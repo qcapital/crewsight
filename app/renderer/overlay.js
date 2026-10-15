@@ -6,6 +6,7 @@ const { ipcRenderer } = require('electron');
 const { project, contentRect, toPixels } = require('../../core/projection');
 const { RemoteViewpoint, Smoother } = require('../../core/remoteState');
 const { P2PSession } = require('./p2p');
+const { estimateShift } = require('../../core/stopDetector');
 
 const $ = (id) => document.getElementById(id);
 const video = $('video'), cv = $('cv'), ctx = cv.getContext('2d');
@@ -40,6 +41,7 @@ async function startShare(src) {
   setShareStatus('live');
   attachLocalTrack();
   if (p2p) p2p.setLocalStream(localStream, cfg.share);
+  if (motionOn) startMotion();
 }
 function stopShare(clearSource = true) {
   clearTimeout(reattachTimer);
@@ -151,6 +153,30 @@ ipcRenderer.on('p2p-cmd', (_e, c) => {
   if (c.op === 'create') s.create(c.role); else if (c.op === 'join') s.join(c.code, c.role); else s.leave();
 });
 ipcRenderer.on('local', (_e, m) => { if (p2p && isP2P()) p2p.sendViewpoint(m); });
+
+// ---------------- own-image motion (gun-limit recording) ----------------
+// Downscaled grayscale frames of MY shared game window; the global shift between frames tells main whether
+// the camera actually moved. Runs only while main asks (limit recording).
+const MW = 96, MH = 54;
+let motionOn = false, motionTimer = null, motionVideo = null, prevGray = null;
+const mcv = document.createElement('canvas'); mcv.width = MW; mcv.height = MH;
+const mctx = mcv.getContext('2d', { willReadFrequently: true });
+function stopMotion() { clearInterval(motionTimer); motionTimer = null; prevGray = null; if (motionVideo) motionVideo.srcObject = null; }
+function startMotion() {
+  stopMotion();
+  if (!motionOn || !localStream) return;
+  motionVideo = motionVideo || document.createElement('video');
+  motionVideo.muted = true; motionVideo.srcObject = localStream; motionVideo.play().catch(() => {});
+  motionTimer = setInterval(() => {
+    if (motionVideo.readyState < 2) return;
+    mctx.drawImage(motionVideo, 0, 0, MW, MH);
+    const d = mctx.getImageData(0, 0, MW, MH).data, g = new Uint8Array(MW * MH);
+    for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8;
+    if (prevGray) { const r = estimateShift(prevGray, g, MW, MH, 8); ipcRenderer.send('local-motion', { sx: r.sx, sy: r.sy, err: +r.err.toFixed(1) }); }
+    prevGray = g;
+  }, 50);
+}
+ipcRenderer.on('motion', (_e, on) => { motionOn = on; startMotion(); });
 
 // ---------------- IPC ----------------
 ipcRenderer.on('config', (_e, c) => {

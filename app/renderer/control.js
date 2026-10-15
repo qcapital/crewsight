@@ -126,6 +126,59 @@ ipcRenderer.on('cal-result', (_e, cal) => {
   el.className = cal.valid ? 'ok' : 'bad';
 });
 
+// gun limits
+let limLive = null, limTrail = [];
+$('limStart').onclick = () => { limTrail = []; $('limResult').style.display = 'none'; ipcRenderer.send('lim-start'); };
+$('limMark').onclick = () => ipcRenderer.send('lim-mark');
+$('limCancel').onclick = () => ipcRenderer.send('lim-cancel');
+$('limExport').onclick = async () => { if (await ipcRenderer.invoke('lim-export')) toast('Gun limits exported'); };
+$('limImport').onclick = async () => {
+  const r = await ipcRenderer.invoke('lim-import');
+  if (r) toast(r === 'ok' ? 'Gun limits imported' : r === 'invalid' ? 'Not a valid gun-limits file' : 'Could not read that file');
+};
+$('limClear').onclick = async () => { if (confirm('Delete the recorded gun limits?')) await ipcRenderer.invoke('lim-clear'); };
+ipcRenderer.on('limrec', (_e, r) => {
+  limLive = r;
+  $('limStart').style.display = r ? 'none' : ''; $('limMark').style.display = r ? '' : 'none'; $('limCancel').style.display = r ? '' : 'none';
+  if (!r) { $('limLive').textContent = ''; drawLimits(); return; }
+  if (r.step === 'zero') $('limLive').textContent = 'Step 1: aim at the nose, then press Mark.';
+  else {
+    for (const p of r.last) limTrail.push(p);
+    if (limTrail.length > 20000) limTrail.splice(0, limTrail.length - 20000);
+    $('limLive').textContent = `Step 2: trace the edges, return to the nose, press Mark · az ${r.az.toFixed(1)}° el ${r.el.toFixed(1)}° · ` +
+      (r.visual ? (r.blocking ? 'AT A STOP: extra mouse movement is being ignored' : 'stop detection active') : 'stop detection OFF (share your game window to enable it): don\'t push into the stops');
+  }
+  $('limLive').className = r.blocking ? 'warn' : 'dim';
+  drawLimits();
+});
+ipcRenderer.on('limrec-result', (_e, x) => {
+  const el = $('limResult'); el.style.display = 'block'; el.className = x.valid ? 'ok' : 'bad';
+  el.textContent = (x.valid ? 'GUN LIMITS SAVED\n' : 'NOT SAVED\n') + x.checks.map((k) => `${!k.pass ? '✘' : k.warn ? '⚠' : '✔'} ${k.name}: ${k.detail}`).join('\n') +
+    `\nmethod: ${x.method} · stop-detector ignored ${Math.round(x.blockedFraction * 100)}% of mouse samples`;
+});
+function drawLimits() {
+  const c = $('limPlot'), g = c.getContext('2d'), W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  const X = (az) => W / 2 + (az / 180) * (W / 2 - 10), Y = (el) => H / 2 - (el / 90) * (H / 2 - 10);
+  g.strokeStyle = '#2a2f35'; g.lineWidth = 1;
+  for (const a of [-180, -90, 0, 90, 180]) { g.beginPath(); g.moveTo(X(a), 0); g.lineTo(X(a), H); g.stroke(); }
+  for (const e of [-90, -45, 0, 45, 90]) { g.beginPath(); g.moveTo(0, Y(e)); g.lineTo(W, Y(e)); g.stroke(); }
+  g.fillStyle = '#8b949e'; g.font = '10px Segoe UI';
+  g.fillText('NOSE', X(0) + 3, Y(0) - 3); g.fillText('left', 4, H / 2 - 3); g.fillText('right', W - 28, H / 2 - 3); g.fillText('up', X(0) + 3, 12); g.fillText('down', X(0) + 3, H - 4);
+  const L = status && status.gunLimits;
+  if (L && L.bins) {
+    g.beginPath();
+    L.bins.forEach((b, i) => (i ? g.lineTo(X(b.az), Y(b.elMax)) : g.moveTo(X(b.az), Y(b.elMax))));
+    [...L.bins].reverse().forEach((b) => g.lineTo(X(b.az), Y(b.elMin)));
+    g.closePath(); g.fillStyle = 'rgba(78,161,255,.18)'; g.fill(); g.strokeStyle = '#4ea1ff'; g.lineWidth = 1.5; g.stroke();
+  }
+  if (limTrail.length) {
+    g.beginPath(); limTrail.forEach((p, i) => (i ? g.lineTo(X(p.az), Y(p.el)) : g.moveTo(X(p.az), Y(p.el))));
+    g.strokeStyle = '#f2cc60'; g.lineWidth = 1.5; g.stroke();
+  }
+  if (limLive && limLive.step === 'trace') { g.beginPath(); g.arc(X(limLive.az), Y(limLive.el), 4, 0, 7); g.fillStyle = limLive.blocking ? '#ff7b72' : '#7ee787'; g.fill(); }
+}
+
 // manual pad
 const pad = $('pad');
 function padSet(e) {
@@ -173,6 +226,12 @@ ipcRenderer.on('status', (_e, s) => {
     : `Calibrated ${new Date(c.createdAt).toLocaleString()} for ${s.role}${c.verticalAssumed ? ' (vertical scale ASSUMED)' : ''}`) : `Not calibrated for ${s.role}.`;
   $('calSummary').className = c.valid ? 'ok' : 'warn';
   $('pilotOpts').style.display = s.role === 'pilot' ? 'block' : 'none';
+  $('limCard').style.opacity = s.role === 'gunner' ? 1 : 0.5;
+  const L = s.gunLimits;
+  $('limSummary').textContent = L ? `Recorded ${new Date(L.recordedAt).toLocaleString()} · left/right ${L.azMin}° … ${L.azMax}° · up/down ${Math.min(...L.bins.map((b) => b.elMin))}° … ${Math.max(...L.bins.map((b) => b.elMax))}°${L.method ? ' · ' + L.method : ''}. Your aim is clamped to these limits.`
+    : (s.role === 'gunner' ? 'No gun limits recorded.' : 'Gun limits are recorded from the Gunner seat.');
+  $('limSummary').className = L ? 'ok' : 'dim';
+  if (!limLive) drawLimits();
   $('hkFail').textContent = s.hotkeyFailures.length ? 'Could not register: ' + s.hotkeyFailures.map((f) => `${f.accelerator} (${HK_LABELS[f.name]})`).join(', ') : '';
   $('shareState').textContent = s.capture ? `${s.capture.status}${s.capture.source ? ' · ' + s.capture.source : ''}${s.capture.detail ? ' · ' + s.capture.detail : ''}` : '';
   $('statusbar').textContent = `${s.role.toUpperCase()} · lobby: ${ss.state} · overlay ${s.overlayVisible ? 'shown' : 'hidden'}${s.clickThrough ? ' · CLICK-THROUGH' : ''} · input: ${s.trackingObserve ? s.helperStatus : 'off'}${s.trackingObserve && !s.focusOk ? ' (game not focused)' : ''}`;

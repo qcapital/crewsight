@@ -9,6 +9,8 @@ const config = require('../core/config');
 const P = require('../core/protocol');
 const { MouseTracker, emptyCalibration, solveAxis, combineAxes } = require('../core/tracker');
 const { SessionClient } = require('../core/netClient');
+const { buildEnvelope, validateEnvelope, LIMITS_VERSION } = require('../core/gunLimits');
+const { StopDetector } = require('../core/stopDetector');
 
 // Allows a second instance on one PC for testing: CREWSIGHT_PROFILE=b npm start
 if (process.env.CREWSIGHT_PROFILE) app.setPath('userData', app.getPath('userData') + '-' + process.env.CREWSIGHT_PROFILE);
@@ -44,6 +46,7 @@ function activeCalibration() {
 }
 function applyCalibration() {
   tracker.setCalibration(activeCalibration());
+  tracker.setLimits(cfg.gunLimits);
   state.epoch = newEpoch(); state.seq = 0; // receivers restart their sequence space
   restartHelper();
 }
@@ -142,7 +145,7 @@ function registerHotkeys() {
     recalibrate: () => { createControl(); toControl('goto', 'tracking'); },
     toggleTracking: () => setObserve(!state.trackingObserve),
     zero: () => { tracker.zero(performance.now()); toControl('toast', 'Tracking re-zeroed to the nose'); },
-    calMark: () => calMark(),
+    calMark: () => (state.limRec ? limMark() : calMark()),
     toggleHud: () => setHudEnabled(!cfg.hud.enabled),
   };
   for (const [name, fn] of Object.entries(actions)) {
@@ -217,6 +220,7 @@ function onHelperLine(line) {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
     tracker.addDelta(dx, dy);
     if (state.cal) { state.cal.cx += dx; state.cal.cy += dy; }
+    if (state.limRec) limOnDelta(dx, dy);
   } else if (k === 'K') tracker.setFreelook(a === '1');
   else if (k === 'F') { tracker.focusOk = cfg.tracking.foregroundFilter ? a === '1' : true; pushStatus(); }
   else if (k === 'E') { state.helperStatus = 'error ' + a; pushStatus(); }
@@ -264,6 +268,89 @@ function calFinish() {
 }
 function pushCal() { toControl('cal-state', state.cal ? { step: CAL_STEPS[state.cal.step], index: state.cal.step, skipY: state.cal.skipY } : null); }
 
+// ---------- gun limit recording ----------
+// Gunner zeroes on the nose, traces the outer limits of where the gun can point, returns to the nose.
+// Deltas are integrated with the calibration scale but WITHOUT the old limits. While the gunner's own game
+// window is being shared, a StopDetector drops mouse movement that doesn't move the image (gun at a stop).
+function limStart() {
+  const c = activeCalibration();
+  if (cfg.role !== 'gunner') return toControl('toast', 'Gun limits are recorded from the Gunner seat.');
+  if (!c.valid || c.noseOnly || !c.degPerCountX) return toControl('toast', 'Calibrate the gunner first (Tracking tab).');
+  state.limRec = { step: 'zero', az: 0, el: 0, points: [], lastPt: 0, blockedX: 0, blockedY: 0, deltas: 0, visual: false,
+    detector: new StopDetector(), cal: c, lastBlock: 0 };
+  if (!state.trackingObserve) setObserve(true);
+  toOverlay('motion', true);
+  pushLim();
+}
+function limOnDelta(dx, dy) {
+  const r = state.limRec; if (r.step !== 'trace') return;
+  const now = performance.now();
+  const f = r.detector.filter(dx, dy, now);
+  r.detector.addMouse(dx, dy, now);
+  r.visual = r.visual || f.visual; r.deltas++;
+  if (f.blockedX) r.blockedX++; if (f.blockedY) r.blockedY++;
+  if (f.blockedX || f.blockedY) r.lastBlock = now;
+  r.az = Math.max(-180, Math.min(180, r.az + (f.dx - (f.undoX || 0)) * r.cal.degPerCountX * r.cal.signX));
+  r.el = Math.max(-90, Math.min(90, r.el + (f.dy - (f.undoY || 0)) * r.cal.degPerCountY * r.cal.signY));
+  if (f.undoX || f.undoY) {
+    // Points recorded while the gun was already against the stop are overshoot: drop them.
+    r.points = r.points.filter((p) => !(p.t > f.undoSince));
+    r.points.push({ az: +r.az.toFixed(2), el: +r.el.toFixed(2), t: now });
+  }
+  if (now - r.lastPt >= 20 && r.points.length < 20000) { r.points.push({ az: +r.az.toFixed(2), el: +r.el.toFixed(2), t: now }); r.lastPt = now; }
+}
+function limMark() {
+  const r = state.limRec; if (!r) return;
+  if (r.step === 'zero') { r.step = 'trace'; r.az = 0; r.el = 0; r.points = [{ az: 0, el: 0 }]; pushLim(); return; }
+  if (r.step === 'trace') limFinish();
+}
+function limFinish() {
+  const r = state.limRec; state.limRec = null; toOverlay('motion', false);
+  const env = buildEnvelope(r.points);
+  const residual = Math.hypot(r.az, r.el);
+  const v = validateEnvelope(env, residual);
+  const method = r.visual ? 'visual-stop-detection' : 'manual-follow';
+  const result = { ...(env || {}), valid: v.valid, checks: v.checks, method, recordedAt: new Date().toISOString(),
+    returnResidualDeg: +residual.toFixed(1), blockedFraction: r.deltas ? +((r.blockedX + r.blockedY) / r.deltas).toFixed(3) : 0,
+    calibrationCreatedAt: r.cal.createdAt, appVersion: app.getVersion(), trace: r.points.filter((_, i) => i % 3 === 0).map(({ az, el }) => ({ az, el })) };
+  if (v.valid) { cfg.gunLimits = result; saveCfg(); tracker.setLimits(cfg.gunLimits); }
+  log('info', 'gun-limits-recorded', { valid: v.valid, method, residual: result.returnResidualDeg });
+  toControl('limrec-result', result); pushLim(); pushStatus();
+}
+setInterval(() => { if (state.limRec) pushLim(); }, 100);
+function pushLim() {
+  const r = state.limRec;
+  toControl('limrec', r ? { step: r.step, az: r.az, el: r.el, n: r.points.length, visual: r.visual,
+    blocking: performance.now() - r.lastBlock < 150, last: r.points.slice(-8) } : null);
+}
+function validLimitsShape(x) {
+  return x && x.version === LIMITS_VERSION && Number.isFinite(x.azMin) && Number.isFinite(x.azMax) && Number.isFinite(x.binDeg) &&
+    Array.isArray(x.bins) && x.bins.length > 0 && x.bins.length < 400 &&
+    x.bins.every((b) => [b.az, b.elMin, b.elMax].every(Number.isFinite) && b.elMax >= b.elMin);
+}
+ipcMain.on('lim-start', () => limStart());
+ipcMain.on('lim-mark', () => limMark());
+ipcMain.on('lim-cancel', () => { state.limRec = null; toOverlay('motion', false); pushLim(); });
+ipcMain.on('local-motion', (_e, d) => { if (state.limRec && d) state.limRec.detector.addImage(d.sx, d.sy, performance.now()); });
+ipcMain.handle('lim-clear', () => { cfg.gunLimits = null; saveCfg(); tracker.setLimits(null); pushStatus(); });
+ipcMain.handle('lim-export', async () => {
+  if (!cfg.gunLimits) return false;
+  const { dialog } = require('electron');
+  const r = await dialog.showSaveDialog(controlWin, { defaultPath: 'wardogs-gun-limits.json', filters: [{ name: 'JSON', extensions: ['json'] }] });
+  if (r.canceled || !r.filePath) return false;
+  fs.writeFileSync(r.filePath, JSON.stringify(cfg.gunLimits, null, 2)); return true;
+});
+ipcMain.handle('lim-import', async () => {
+  const { dialog } = require('electron');
+  const r = await dialog.showOpenDialog(controlWin, { properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  let x;
+  try { const raw = fs.readFileSync(r.filePaths[0], 'utf8'); if (raw.length > 2e6) throw new Error('too big'); x = JSON.parse(raw); } catch { return 'unreadable'; }
+  if (!validLimitsShape(x)) return 'invalid';
+  cfg.gunLimits = { ...x, importedAt: new Date().toISOString() }; saveCfg(); tracker.setLimits(cfg.gunLimits); pushStatus();
+  return 'ok';
+});
+
 // ---------- local estimate + send loop ----------
 function localEstimate(now) {
   const mode = cfg.tracking.mode;
@@ -276,7 +363,7 @@ function localEstimate(now) {
     const c = activeCalibration();
     return { az: null, el: null, src: 'none', st: c.valid ? 'UNAVAILABLE' : 'UNCALIBRATED', cal: c.valid };
   }
-  if (state.cal) return { az: null, el: null, src: 'none', st: 'CALIBRATING', cal: false };
+  if (state.cal || state.limRec) return { az: null, el: null, src: 'none', st: 'CALIBRATING', cal: false };
   // Helper heartbeat lost -> unavailable rather than frozen.
   if (helper && state.helperStatus === 'running' && now - state.helperLastBeat > 2500) tracker.inputHealthy = false;
   return tracker.estimate();
@@ -319,7 +406,8 @@ function pushStatus() {
     role: cfg.role, overlayVisible: state.overlayVisible, clickThrough: state.clickThrough,
     trackingObserve: state.trackingObserve, trackingMode: cfg.tracking.mode, helperStatus: state.helperStatus,
     focusOk: tracker.focusOk, hotkeyFailures: state.hotkeyFailures, session: { ...state.session },
-    calibration: { valid: c.valid, noseOnly: !!c.noseOnly, createdAt: c.createdAt, verticalAssumed: !!c.verticalAssumed },
+    calibration: { valid: c.valid, noseOnly: !!c.noseOnly, createdAt: c.createdAt, verticalAssumed: !!c.verticalAssumed, approximate: !!c.approximate },
+    gunLimits: cfg.gunLimits ? { azMin: cfg.gunLimits.azMin, azMax: cfg.gunLimits.azMax, bins: cfg.gunLimits.bins, trace: cfg.gunLimits.trace, recordedAt: cfg.gunLimits.recordedAt || cfg.gunLimits.importedAt, method: cfg.gunLimits.method, returnResidualDeg: cfg.gunLimits.returnResidualDeg } : null,
     capture: state.capture,
   });
 }
@@ -404,13 +492,14 @@ app.whenReady().then(() => {
   cfg = loaded.config;
   if (loaded.recovered) log('warn', 'config-recovered-defaults', {});
   state.trackingObserve = !!cfg.tracking.observeInput;
-  tracker.setCalibration(activeCalibration());
+  tracker.setCalibration(activeCalibration()); tracker.setLimits(cfg.gunLimits);
   createOverlay(); createHud(); createControl();
   screen.on('display-metrics-changed', () => createHud()); screen.on('display-removed', () => createHud()); screen.on('display-added', () => createHud()); createTray(); registerHotkeys(); restartHelper(); startLoop();
   if (loaded.recovered) setTimeout(() => toControl('toast', 'Settings file was unreadable; defaults restored (old file backed up).'), 1500);
   log('info', 'started', { version: app.getVersion() });
   const st = process.env.CREWSIGHT_SELFTEST;
   if (st && st.startsWith('display,')) overlayWin.webContents.once('did-finish-load', () => runDisplayTest(st.split(',')[1]));
+  else if (st && st.startsWith('limits,')) overlayWin.webContents.once('did-finish-load', () => runLimitsTest(st.split(',')[1]));
   else if (st && st.startsWith('game,')) overlayWin.webContents.once('did-finish-load', () => runGameTest(st.split(',')[1], st.split(',')[2]));
   else if (st) runSelfTest(st);
 });
@@ -502,6 +591,46 @@ async function runGameTest(dir, pid) {
       windowsFullscreenState: quns },
     overlay: { visibleMagentaPixelsInScreenshot: Number(cap), clickThrough: state.clickThrough, display: gameDisplay.id },
   }, null, 2));
+  app.isQuitting = true; app.quit();
+}
+
+// Gun-limit recording check (scripts/limitstest.js): synthetic mouse trace with deliberate pushes into stops,
+// synthetic "image not moving" during the pushes. CREWSIGHT_SELFTEST=limits,<dir>
+async function runLimitsTest(dir) {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  cfg.role = 'gunner';
+  cfg.calibrations.gunner = { ...emptyCalibration('gunner'), valid: true, degPerCountX: 0.1, degPerCountY: 0.1, signX: 1, signY: -1, createdAt: 'test' };
+  cfg.gunLimits = null; applyCalibration();
+  stopHelper(); state.trackingObserve = true;
+  limStart(); limMark(); // zero at the nose, start tracing
+  const r = state.limRec;
+  // Feed mouse + image like the helper/overlay would: 10 ms mouse ticks, 50 ms image ticks.
+  const move = async (dxTotal, dyTotal, steps, imageMoves) => {
+    for (let i = 0; i < steps; i++) {
+      onHelperLine(`M ${Math.round(dxTotal / steps)} ${Math.round(dyTotal / steps)}`);
+      if (i % 5 === 0) r.detector.addImage(imageMoves.x ? 2 : 0, imageMoves.y ? 2 : 0, performance.now());
+      await wait(10);
+    }
+  };
+  // True gun range: az -60..+40, el -30..+20. 0.1 deg/count.
+  await move(0, -200, 40, { y: true });   // up to +20
+  await move(0, -150, 30, { y: false });  // PUSH 15 deg further up into the stop: image static
+  await move(400, 0, 50, { x: true });    // along the top to +40
+  await move(300, 0, 50, { x: false });   // PUSH 30 deg further right: image static
+  await move(0, 500, 100, { y: true });    // down the right edge to -30
+  await move(-1000, 0, 125, { x: true }); // along the bottom to -60
+  await move(0, -500, 100, { y: true });   // up the left edge to +20
+  await move(600, 200, 100, { x: true, y: true }); // back to the nose
+  limMark();
+  await wait(200);
+  const L = cfg.gunLimits;
+  // During play: pushing far past the right stop and coming back must not drift.
+  tracker.inputHealthy = true; tracker.focusOk = true; tracker.zero(0);
+  tracker.addDelta(5000, 0); const atStop = tracker.estimate().az;
+  tracker.addDelta(-400, 0); const back = tracker.estimate().az;
+  fs.writeFileSync(path.join(dir, 'limits.json'), JSON.stringify({ saved: !!L, azMin: L && L.azMin, azMax: L && L.azMax,
+    elTop: L && Math.max(...L.bins.map((b) => b.elMax)), elBottom: L && Math.min(...L.bins.map((b) => b.elMin)),
+    residual: L && L.returnResidualDeg, method: L && L.method, blockedFraction: L && L.blockedFraction, atStop, back }, null, 2));
   app.isQuitting = true; app.quit();
 }
 

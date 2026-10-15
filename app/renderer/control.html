@@ -138,6 +138,25 @@ main{padding-bottom:40px}
     </div>
     <pre id="calResult" style="display:none;margin-top:10px"></pre>
   </div>
+  <h3>Gun limits (gunner)</h3>
+  <div class="card" id="limCard">
+    <div id="limSummary" class="dim">No gun limits recorded.</div>
+    <div class="dim" style="margin:6px 0">Records exactly where the gun can point. Afterwards, your tracked aim stops at the same limits as the real gun, so pushing into a stop no longer makes your dot drift.
+      <b>How:</b> land the helicopter (nothing else should move on screen) and share your game window on the Screen share tab.
+      Then press Record, aim at the nose and press Mark (Ctrl+Alt+M). Slowly sweep the gun around the <b>whole outer edge</b> of its range (top edge, far side, bottom edge, other side), come back to the nose and press Mark again.
+      Follow the edges closely and don't keep pushing into a stop. While your screen is shared, the app also detects when the picture stops moving and ignores that mouse movement.</div>
+    <canvas id="limPlot" width="560" height="220" style="background:#0d0f12;border:1px solid var(--line);display:block;max-width:100%"></canvas>
+    <div id="limLive" class="dim" style="margin-top:6px"></div>
+    <div class="row" style="margin-top:6px">
+      <button class="b p" id="limStart">Record limits</button>
+      <button class="b" id="limMark" style="display:none">Mark (Ctrl+Alt+M)</button>
+      <button class="b" id="limCancel" style="display:none">Cancel</button>
+      <button class="b" id="limExport">Export…</button>
+      <button class="b" id="limImport">Import…</button>
+      <button class="b" id="limClear">Clear</button>
+    </div>
+    <pre id="limResult" style="display:none;margin-top:8px"></pre>
+  </div>
   <h3>Manual pad</h3>
   <div class="card"><div id="pad"><div id="padDot" style="left:50%;top:50%"></div></div>
     <div class="dim">Centre = nose. Horizontal ±180°, vertical ±90°. Used when Source = Manual.</div></div>

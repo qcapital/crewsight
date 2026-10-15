@@ -4,6 +4,8 @@
 // It is only as good as the assumption that the game maps raw counts linearly to view angle
 // (no in-game acceleration/smoothing, no automatic recentering). Calibration checks this.
 
+const { clampToEnvelope } = require('./gunLimits');
+
 const CAL_VERSION = 1;
 
 // Pilot default: the mouse flies the helicopter and the camera stays on the nose, so the pilot's
@@ -77,6 +79,8 @@ class MouseTracker {
     this.lastResetAt = null;
   }
   setCalibration(cal) { this.cal = cal; this.az = 0; this.el = 0; }
+  /** Recorded gun limits (degrees). Clamping makes pushes into a stop cost nothing, exactly like the gun. */
+  setLimits(env) { this.limits = env || null; }
   zero(now) { this.az = 0; this.el = 0; this.lastResetAt = now; }
   setFreelook(down) {
     this.freelookHeld = down;
@@ -90,6 +94,7 @@ class MouseTracker {
     this.el += dy * c.degPerCountY * c.signY;
     this.az = Math.max(-c.azLimit, Math.min(c.azLimit, this.az));
     this.el = Math.max(-c.elLimit, Math.min(c.elLimit, this.el));
+    if (this.limits && c.role === 'gunner') ({ az: this.az, el: this.el } = clampToEnvelope(this.limits, this.az, this.el));
   }
   /** Current estimate + honest state. */
   estimate() {

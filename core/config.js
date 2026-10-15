@@ -30,6 +30,8 @@ const DEFAULTS = Object.freeze({
     openSettings: 'Ctrl+Alt+S', recalibrate: 'Ctrl+Alt+R', toggleTracking: 'Ctrl+Alt+T',
     zero: 'Ctrl+Alt+Z', calMark: 'Ctrl+Alt+M', toggleHud: 'Ctrl+Alt+H' },
   calibrations: { pilot: null, gunner: null },
+  // Recorded gun viewport limits (degrees, nose-relative). Kept across app versions; export/import as JSON.
+  gunLimits: null,
 });
 
 function isPlainObj(v) { return v && typeof v === 'object' && !Array.isArray(v); }
