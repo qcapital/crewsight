@@ -14,7 +14,8 @@ const { clampToEnvelope } = require('./gunLimits');
 const D = Math.PI / 180;
 
 class GunnerFusion {
-  constructor({ degPerCountX = null, degPerCountY = null, signX = 1, signY = -1, limits = null } = {}) {
+  constructor({ degPerCountX = null, degPerCountY = null, signX = 1, signY = -1, limits = null, minConf = 0.4 } = {}) {
+    this.minConf = minConf;
     this.qGun = A.IDENTITY; this.qHeli = A.IDENTITY; this.heliOk = false;
     this.scaleX = degPerCountX; this.scaleY = degPerCountY; this.signX = signX; this.signY = signY;
     this.limits = limits; this.learnN = 0;
@@ -36,7 +37,7 @@ class GunnerFusion {
    * frame) or null; mouse = raw counts since the previous frame.
    */
   step(inc, mouse = { dx: 0, dy: 0 }) {
-    const visual = inc && inc.conf >= 0.4;
+    const visual = inc && inc.conf >= this.minConf;
     this.visualConf = inc ? inc.conf : 0;
     if (visual) {
       this.qGun = A.integrate(this.qGun, inc.yaw, inc.pitch, inc.roll);
@@ -48,7 +49,16 @@ class GunnerFusion {
       this.qGun = A.integrate(this.qGun, yaw, pitch, 0);
       this.lastSource = 'mouse';
     } else if (!visual) this.lastSource = this.scaleX ? this.lastSource : 'none';
+    this._gimbal();
     return this.estimate();
+  }
+
+  // A gun mount turns left/right and up/down only: it can't roll relative to the airframe. Re-imposing that each
+  // frame stops small roll-estimation errors from slowly turning horizontal movement into fake vertical movement.
+  _gimbal() {
+    const qT = A.qmul(A.qconj(this.qHeli), this.qGun);
+    const { az, el } = A.azElFromDir(A.qrot(qT, [1, 0, 0]));
+    this.qGun = A.qmul(this.qHeli, A.qmul(A.qFromYPR(az * D, 0, 0), A.qFromYPR(0, el * D, 0)));
   }
 
   // While the image is reliable and the mouse moved clearly, image rotation / counts = degrees per count.

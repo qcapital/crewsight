@@ -50,7 +50,7 @@ function activeCalibration() {
 function resetFusion() {
   const c = cfg.calibrations.gunner;
   const ok = c && c.valid && !c.noseOnly && c.degPerCountX;
-  fusion = new GunnerFusion({ degPerCountX: ok ? c.degPerCountX : null, degPerCountY: ok ? c.degPerCountY : null,
+  fusion = new GunnerFusion({ minConf: cfg.tracking.mode === 'center' ? 0.2 : 0.4, degPerCountX: ok ? c.degPerCountX : null, degPerCountY: ok ? c.degPerCountY : null,
     signX: ok ? c.signX : 1, signY: ok ? c.signY : -1, limits: cfg.gunLimits });
 }
 function applyCalibration() {
@@ -427,11 +427,13 @@ ipcMain.on('mark-in', (_e, mark) => toHud('mark', mark));
 ipcMain.on('mark-local', (_e, mark) => toHud('mark', { ...mark, mine: true }));
 ipcMain.on('att-local', (_e, a) => toHud('att', { ...a, source: 'own' }));
 ipcMain.on('att-in', (_e, a) => { toHud('att', { ...a, source: 'crew' }); fusion.setHeli(a.q, a.ok); fusionIn.lastHeli = performance.now(); });
+const camStats = { n: 0, nul: 0, low: 0, mid: 0, high: 0, maxStepDeg: 0, usedSum: 0 };
 ipcMain.on('cam-inc', (_e, inc) => {
   const now = performance.now();
+  camStats.n++; if (!inc) camStats.nul++; else { if (inc.conf < 0.2) camStats.low++; else if (inc.conf < 0.4) camStats.mid++; else camStats.high++; camStats.maxStepDeg = Math.max(camStats.maxStepDeg, Math.abs(inc.yaw) * 57.3); }
   fusionIn.lastCam = now;
   if (inc && inc.conf >= 0.4) fusionIn.lastVisual = now;
-  fusion.step(inc, fusionIn.mouse);
+  fusion.step(inc, cfg.tracking.mode === 'center' ? { dx: 0, dy: 0 } : fusionIn.mouse); // centre mode: picture only
   fusionIn.mouse = { dx: 0, dy: 0 };
 });
 ipcMain.on('att-out', (_e, a) => { if (cfg.network.transport === 'relay' && net.state === 'connected') net.sendAtt(a); });
@@ -446,7 +448,15 @@ function localEstimate(now) {
     const t = now / 1000;
     return { az: 70 * Math.sin(t * 0.6), el: 25 * Math.sin(t * 0.9), src: 'simulated', st: 'LIVE_SIMULATED', cal: false };
   }
-  if (mode === 'center') return { az: 0, el: 0, src: 'center', st: 'LIVE_CENTER', cal: false };
+  if (mode === 'center') {
+    if (cfg.role === 'pilot') return { az: 0, el: 0, src: 'center', st: 'LIVE_CENTER', cal: false }; // pilot's centre = nose
+    if (state.cal || state.limRec) return { az: null, el: null, src: 'none', st: 'CALIBRATING', cal: false };
+    if (now - fusionIn.lastCam > 600) return { az: null, el: null, src: 'none', st: 'UNAVAILABLE', cal: false, why: 'share your game window' };
+    const e = fusion.estimate();
+    const heliFresh = now - fusionIn.lastHeli < 1000 && e.heliOk;
+    return { az: e.az, el: e.el, src: 'center', st: heliFresh ? 'LIVE_CENTER' : 'DEGRADED', cal: false,
+      why: heliFresh ? null : 'pilot not sharing: helicopter turns also move your dot' };
+  }
   if (mode === 'manual') return { az: state.manual.az, el: state.manual.el, src: 'manual', st: 'LIVE_MANUAL', cal: false };
   if (mode === 'visual' && cfg.role === 'gunner' && !state.cal && !state.limRec) {
     // Gunner tracked from their own screen. Needs the gunner sharing their game window; the pilot's attitude
@@ -525,7 +535,7 @@ ipcMain.handle('set-config', (_e, patch) => {
   if (patch.hotkeys) registerHotkeys();
   if (patch.hud) { createHud(); }
   if (patch.network) startLoop();
-  if (roleChanged || patch.tracking) applyCalibration();
+  if (roleChanged || patch.tracking) applyCalibration(); // also rebuilds the gunner fusion for the new mode
   if (roleChanged && state.session.state !== 'idle') { sessionLeave(); toControl('toast', 'Role changed: left the session. Re-join with the new role.'); }
   pushStatus();
   return cfg;
@@ -758,7 +768,24 @@ function runSelfTest(spec) {
       memMB: Math.round(pm.reduce((a, p) => a + p.memory.workingSetSize, 0) / 1024),
       helper: helper ? 'on' : 'off', vfps: lastDiag && lastDiag.peerFps, vsize: lastDiag && lastDiag.videoSize });
   }, 10000);
+  let panWin = null, panZeroYaw = null;
   overlayWin.webContents.once('did-finish-load', async () => {
+    if (mode === 'join' && process.env.CREWSIGHT_PANTEST) {
+      // The turning scene runs in its own process (scripts/panwin.js, started by selftest.js).
+      for (let i = 0; i < 50 && !panWin; i++) {
+        const wins = await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } });
+        panWin = wins.find((s) => s.name.startsWith('PanTest')) || null;
+        if (!panWin) await new Promise((r) => setTimeout(r, 200));
+      }
+      if (panWin) toOverlay('source', { id: panWin.id, name: panWin.name });
+      // Set "the middle" and remember the scene's true yaw at that instant, so only movement after it is compared.
+      setTimeout(async () => {
+        fusion.zero();
+        const w = (await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } })).find((x) => panWin && x.id === panWin.id);
+        panZeroYaw = w ? Number(w.name.split('yaw=')[1]) : null;
+      }, 2500);
+      return;
+    }
     const screens = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
     if (screens[0]) toOverlay('source', { id: screens[0].id, name: screens[0].name });
   });
@@ -774,9 +801,12 @@ function runSelfTest(spec) {
     }
   }, 500));
   setTimeout(async () => {
+    // Same-instant comparison for the turning-scene test: true scene yaw vs the gunner's own estimate.
+    let panSnap = null;
+    if (panWin) { const w = (await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } })).find((x) => x.id === panWin.id); const e = localEstimate(performance.now()); panSnap = { camStats, zeroYaw: panZeroYaw, trueYaw: w ? Number(w.name.split('yaw=')[1]) : null, estAz: e.az, estEl: e.el, st: e.st }; }
     try { fs.writeFileSync(path.join(dir, `overlay-${mode}.png`), (await overlayWin.webContents.capturePage()).toPNG()); } catch {}
     try { fs.writeFileSync(path.join(dir, `hud-${mode}.png`), (await hudWin.webContents.capturePage()).toPNG()); } catch {}
-    fs.writeFileSync(outFile, JSON.stringify({ marksSeen, hud: { hudSamples, hudDrawn, hudLast }, metrics, staleSamples, diagSamples, session: state.session, diag: { ...lastDiag, rttMs: lastDiag && lastDiag.transport === 'p2p' ? lastDiag.p2pRttMs : net.rttMs } }, null, 2));
+    fs.writeFileSync(outFile, JSON.stringify({ panSnap, panTruthYaw: panWin ? await (async () => { const w = (await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } })).find((s) => s.id === panWin.id); return w ? Number(w.name.split('yaw=')[1]) : null; })() : null, marksSeen, hud: { hudSamples, hudDrawn, hudLast }, metrics, staleSamples, diagSamples, session: state.session, diag: { ...lastDiag, rttMs: lastDiag && lastDiag.transport === 'p2p' ? lastDiag.p2pRttMs : net.rttMs } }, null, 2));
     app.isQuitting = true; app.quit();
   }, Number(process.env.CREWSIGHT_SELFTEST_MS || 15000));
 }

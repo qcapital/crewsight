@@ -215,7 +215,7 @@ const rctx = rcv.getContext('2d', { willReadFrequently: true });
 const attVideo = document.createElement('video'); attVideo.muted = true;
 function attitudeWanted() {
   if (!cfg || !localStream) return false;
-  return (cfg.role === 'pilot' && cfg.attitude.enabled) || (cfg.role === 'gunner' && cfg.tracking && cfg.tracking.mode === 'visual');
+  return (cfg.role === 'pilot' && cfg.attitude.enabled) || (cfg.role === 'gunner' && cfg.tracking && (cfg.tracking.mode === 'visual' || cfg.tracking.mode === 'center'));
 }
 function updateAttitudeLoop() {
   if (!attitudeWanted()) { clearInterval(rotTimer); rotTimer = null; rotEst = null; return; }

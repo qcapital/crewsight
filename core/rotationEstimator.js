@@ -14,7 +14,7 @@ class RotationEstimator {
   constructor({ w = 160, h = 90, fovH = 90, grid = [9, 5], patch = 14, search = 10, step = 2, minTexture = 40 } = {}) {
     Object.assign(this, { w, h, grid, patch, search, step, minTexture });
     this.setFov(fovH);
-    this.prev = null;
+    this.prev = null; this.key = null; this.rel = [0, 0, 0];
     const [gx, gy] = grid, m = search + patch / 2 + 1;
     this.cells = [];
     for (let j = 0; j < gy; j++) for (let i = 0; i < gx; i++) {
@@ -22,7 +22,7 @@ class RotationEstimator {
     }
   }
   setFov(fovH) { this.f = (this.w / 2) / Math.tan(((fovH / 2) * Math.PI) / 180); }
-  reset() { this.prev = null; }
+  reset() { this.prev = null; this.key = null; this.rel = [0, 0, 0]; }
 
   _match(prev, cur, cx, cy) {
     const { w, patch: p, search: s, step } = this, h2 = p >> 1;
@@ -54,10 +54,30 @@ class RotationEstimator {
     return { dx: bx + fx, dy: by + fy };
   }
 
-  /** Feed a grayscale frame (Uint8Array w*h). Returns the rotation since the previous frame, or null. */
+  /**
+   * Feed a grayscale frame (Uint8Array w*h). Returns the rotation since the previous frame, or null.
+   * Keyframes: each frame is measured against a reference frame and the increment is the change of that
+   * measurement. Small per-frame motions (slow turns) are thus measured as larger, precise shifts, and matching
+   * errors don't pile up every frame. The reference advances once the view has turned ~2.5° or matching weakens.
+   */
   push(gray) {
-    const prev = this.prev; this.prev = gray;
-    if (!prev) return null;
+    const first = !this.key;
+    this.prev = gray;
+    if (first) { this.key = gray; this.rel = [0, 0, 0]; return null; }
+    const r = this._between(this.key, gray);
+    const KEY_ADVANCE = 2.5 * Math.PI / 180;
+    if (r.conf > 0) {
+      const inc = { ...r, yaw: r.yaw - this.rel[0], pitch: r.pitch - this.rel[1], roll: r.roll - this.rel[2] };
+      this.rel = [r.yaw, r.pitch, r.roll];
+      if (Math.max(Math.abs(r.yaw), Math.abs(r.pitch), Math.abs(r.roll)) > KEY_ADVANCE || r.conf < 0.5) { this.key = gray; this.rel = [0, 0, 0]; }
+      return inc;
+    }
+    // Lost the reference (big jump or no detail): restart from this frame; this frame's motion is unknown.
+    this.key = gray; this.rel = [0, 0, 0];
+    return r;
+  }
+
+  _between(prev, gray) {
     const obs = [];
     for (const c of this.cells) {
       if (c.still > 8) { c.still -= 0.002; continue; } // learned static region (cockpit / gun model): skip, re-test after ~1-2 min
@@ -102,8 +122,8 @@ class RotationEstimator {
     }
     const conf = inl.length / Math.max(obs.length, 1) * Math.min(1, inl.length / 10);
     if (inl.length < 6) return { yaw: 0, pitch: 0, roll: 0, conf: 0, used: obs.length, reason: 'no-consistent-motion' };
-    // Deadband: sub-pixel matching noise is ~0.01°/frame; below 0.02°/frame treat as no rotation so a hovering
-    // helicopter doesn't drift (slow turns under ~0.6°/s at 30 fps are not tracked).
+    // Deadband against the reference frame: sub-pixel matching noise is ~0.01°; below 0.02° treat as no rotation
+    // so a hovering helicopter doesn't drift. (Measured against the keyframe, so slow turns still accumulate.)
     const DB = 0.02 * Math.PI / 180;
     if (Math.abs(p[0]) < DB && Math.abs(p[1]) < DB && Math.abs(p[2]) < DB) return { yaw: 0, pitch: 0, roll: 0, div: p[3], conf, used: inl.length };
     return { yaw: p[0], pitch: p[1], roll: p[2], div: p[3], conf, used: inl.length };

@@ -18,6 +18,7 @@ const electron = require('electron');
       env: { ...process.env, CREWSIGHT_PROFILE: 'selftest-' + profile, CREWSIGHT_SELFTEST: `${mode},${dir},${url}` } });
     p.on('exit', res);
   });
+  if (process.env.CREWSIGHT_PANTEST) spawn(electron, [path.join(__dirname, 'panwin.js')], { stdio: 'ignore', env: { ...process.env, PAN_MS: String(Number(process.env.CREWSIGHT_SELFTEST_MS || 15000) + 15000) } });
   await Promise.all([run('create', 'a'), run('join', 'b')]);
   await relay.close();
   let ok = true;
@@ -43,7 +44,13 @@ const electron = require('electron');
 
       (m === 'create' ? (r.marksSeen || []).some((k) => k.mine) : (r.marksSeen || []).some((k) => !k.mine && k.az !== null && (process.env.CREWSIGHT_TRANSPORT !== 'p2p' || k.imgBytes > 1000) && k.hasQ)) &&
       !!(r.hud && r.hud.hudLast && r.hud.hudLast.att && r.hud.hudLast.att.fresh);
-    ok = ok && pass;
+    let panOk = true;
+    if (m === 'join' && r.panSnap && r.panSnap.zeroYaw !== null) {
+      const turned = r.panSnap.trueYaw - r.panSnap.zeroYaw, err = r.panSnap.estAz - turned;
+      panOk = Math.abs(err) <= Math.max(3, 0.08 * Math.abs(turned)) && Math.abs(r.panSnap.estEl) < 3;
+      console.log(`   screen-centre tracking: scene turned ${turned.toFixed(1)}°, gunner measured ${r.panSnap.estAz.toFixed(1)}° (error ${err.toFixed(1)}°), vertical drift ${r.panSnap.estEl.toFixed(1)}° → ${panOk ? 'OK' : 'TOO FAR OFF'}`);
+    }
+    ok = ok && pass && panOk;
     if (r.metrics && r.metrics.length) {
       const ms = r.metrics.slice(1); // skip startup sample
       const avg = (k) => (ms.reduce((a, x) => a + x[k], 0) / Math.max(1, ms.length)).toFixed(1);

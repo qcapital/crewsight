@@ -169,6 +169,18 @@ This fixes the dot running ahead of the optic during fast flicks and drifting af
 
 In-game accuracy hasn't been measured yet.
 
+## "Centre of my screen" tracking (0.5.2)
+Tracking → Source → **Centre of my screen**. Your crosshair, the centre of your screen, is followed as it moves away from the middle, measured purely from your own shared game picture with no mouse involved. That offset is sent to your crew member live, labelled **CENTRE OF SCREEN**.
+
+1. Share your game window.
+2. Aim straight along the nose and press `Ctrl+Alt+Z`. This sets the middle.
+3. Turn the gun. The dot follows how far your screen centre has turned from the middle, left/right and up/down.
+
+- **Helicopter turns:** if the pilot is sharing, the helicopter's own turning is subtracted, so only your gun's movement counts. If the pilot isn't sharing, your crew member sees **DEGRADED**, because helicopter turns then also move your dot.
+- **Seats:** for the pilot the centre of the screen is the nose, so this source simply sends straight ahead.
+- **Accuracy:** tested in-app with a synthetic 3D scene turning at a known rate and captured through the real pipeline. The measured turn was within about 2–3% of the true turn, with under 0.1° of false vertical drift. In-game accuracy hasn't been measured yet.
+- **Also in 0.5.2:** screen-motion measurement now compares against reference keyframes, which removed a 15% under-reading on slow turns. This improves the screen-based gunner mode and the pilot's helicopter-rotation tracking too.
+
 ## Known limitations
 - **Gunner calibration:** the pilot's HUD works with no setup. The gunner must calibrate mouse tracking; otherwise the gunner's own aim is unknown, so the gunner's HUD cannot place the pilot's dot, and the pilot's HUD cannot place the gunner's.
 - **HUD accuracy:** the HUD assumes the game's horizontal FOV is set correctly and ignores the few metres between the two seats. Very close targets will be slightly off.
