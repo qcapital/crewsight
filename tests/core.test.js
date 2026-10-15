@@ -113,8 +113,8 @@ test('calibration: valid swing yields deg/count and sign', () => {
 });
 test('calibration: invalid cases cannot be marked valid', () => {
   assert.equal(solveAxis({ refDeg: 90, countsPos: 1800, countsReturn: 0, countsNeg: 1800 }).valid, false, 'same sign');
-  assert.equal(solveAxis({ refDeg: 90, countsPos: 1800, countsReturn: 0, countsNeg: -1000 }).valid, false, 'asymmetric');
-  assert.equal(solveAxis({ refDeg: 90, countsPos: 1800, countsReturn: 600, countsNeg: -1800 }).valid, false, 'drift');
+  { const r = solveAxis({ refDeg: 90, countsPos: 1800, countsReturn: 0, countsNeg: -1000 }); assert.ok(r.valid && !r.reliable, 'asymmetric = approximate'); }
+  { const r = solveAxis({ refDeg: 90, countsPos: 1800, countsReturn: 600, countsNeg: -1800 }); assert.ok(r.valid && !r.reliable, 'drift = approximate'); }
   assert.equal(solveAxis({ refDeg: 90, countsPos: 10, countsReturn: 0, countsNeg: -10 }).valid, false, 'resolution');
   assert.equal(solveAxis({ refDeg: 90, countsPos: NaN, countsReturn: 0, countsNeg: -10 }).valid, false);
 });
@@ -201,4 +201,18 @@ test('manoeuvres: nose-relative sharing stays exact under any roll/pitch/yaw', (
     if (tx < 0 || tx > 1 || ty < 0 || ty > 1) { assert.equal(got.inView, false); continue; }
     near(got.x, tx, 1e-9); near(got.y, ty, 1e-9);
   }
+});
+
+test('calibration (lenient): real gunner data is accepted as approximate with vertical from horizontal', () => {
+  const { combineAxes } = require('../core/tracker');
+  // Reported in-game: uneven horizontal swings, vertical turret hit a stop (41 % residual).
+  const sx = solveAxis({ refDeg: 90, countsPos: 4316, countsReturn: 69, countsNeg: -6797 });
+  const sy = solveAxis({ refDeg: 45, countsPos: -1203, countsReturn: -494, countsNeg: 1404 });
+  assert.ok(sx.valid && !sx.reliable, 'horizontal usable but approximate');
+  assert.ok(sy.valid && !sy.reliable, 'vertical flagged unreliable');
+  const c = combineAxes(sx, sy);
+  assert.ok(c.valid && c.approximate && c.verticalFromHorizontal);
+  near(c.degPerCountY, sx.degPerCount); assert.equal(c.signY, -1, 'measured sign kept: mouse up = look up');
+  assert.equal(solveAxis({ refDeg: 90, countsPos: 4000, countsReturn: 0, countsNeg: -500 }).valid, false, '8x mismatch still rejected');
+  assert.equal(combineAxes(solveAxis({ refDeg: 90, countsPos: 30, countsReturn: 0, countsNeg: -30 }), sy).valid, false);
 });

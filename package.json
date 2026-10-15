@@ -1,7 +1,7 @@
 {
   "name": "wardogs-crewsight",
   "productName": "CrewSight",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Pilot-gunner live viewpoint overlay for WarDogs (external companion; no game interaction)",
   "main": "app/main.js",
   "license": "MIT",

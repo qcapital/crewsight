@@ -118,13 +118,14 @@ main{padding-bottom:40px}
   <div class="card">
     <div id="calSummary" class="dim">No calibration</div>
     <div id="calSetup">
-      <label><span>Horizontal reference angle (°)</span><input type="number" id="refX" value="90" min="10" max="180"></label>
-      <label><span>Vertical reference angle (°)</span><input type="number" id="refY" value="45" min="10" max="90"></label>
+      <label><span>Horizontal reference angle (°)</span><input type="number" id="refX" value="45" min="5" max="180"></label>
+      <label><span>Vertical reference angle (°)</span><input type="number" id="refY" value="20" min="5" max="90"></label>
       <label><span>Skip vertical (assume same scale)</span><input type="checkbox" id="skipY"></label>
       <div id="pilotOpts">
         <label><span>Free-look key (hex VK)</span><input type="text" id="vk" value="12" style="width:60px"><span class="dim" style="min-width:0">12 = Alt</span></label>
         <label><span>View snaps back on release</span><input type="checkbox" id="recenter" checked></label>
       </div>
+      <div class="dim" style="margin:6px 0">Tips: pick reference turns the gun can reach without hitting its stops. The gun doesn't need to stay level: horizontal steps only measure side-to-side mouse movement, and vertical steps only measure up-down movement. Uneven swings or a turret stop only produce a warning, and if the vertical result is unreliable the horizontal scale is used for both axes.</div>
       <div class="row">
         <button class="b p" id="calStart">Start calibration</button>
         <button class="b" id="noseOnly">My view is fixed to the nose</button>

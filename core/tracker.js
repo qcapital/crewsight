@@ -21,27 +21,51 @@ function emptyCalibration(role) {
  * Calibration procedure (per axis): user zeroes on the nose, turns to a reference they can
  * identify at a known angle (default 90° = straight out the side), marks; returns to the
  * nose, marks (return check); turns the same angle the other way, marks.
- * Validation (all must pass): opposite signs, magnitudes agree within 15 %, return residual
- * within 10 % of the swing, enough counts for resolution.
+ * Hard failures (data unusable): missing marks, too few counts, both swings in the same direction,
+ * swings differing by more than 2.5x. Soft checks only WARN and mark the axis "approximate":
+ * symmetry outside 0.85–1.18 (usually a misjudged reference angle) and return residual > 10 %
+ * (usually the turret hit a stop while the mouse kept moving). Scale = reference / mean swing.
  */
 function solveAxis({ refDeg, countsPos, countsReturn, countsNeg }) {
   const checks = [];
   const ok = (name, pass, detail) => { checks.push({ name, pass, detail }); return pass; };
+  const warn = (name, good, detail) => { checks.push({ name, pass: true, warn: !good, detail }); return good; };
   const finite = [refDeg, countsPos, countsReturn, countsNeg].every(Number.isFinite);
-  if (!ok('numeric', finite, 'all marks recorded')) return { valid: false, checks };
-  ok('reference-angle', refDeg >= 10 && refDeg <= 180, `${refDeg}°`);
+  if (!ok('numeric', finite, 'all marks recorded')) return { valid: false, reliable: false, checks };
+  ok('reference-angle', refDeg >= 5 && refDeg <= 180, `${refDeg}°`);
   ok('resolution', Math.abs(countsPos) >= 50 && Math.abs(countsNeg) >= 50,
     `${countsPos} / ${countsNeg} counts (need ≥50)`);
   ok('opposite-signs', Math.sign(countsPos) === -Math.sign(countsNeg) && countsPos !== 0,
     'positive and negative swings move in opposite directions');
   const ratio = Math.abs(countsPos) / Math.max(1, Math.abs(countsNeg));
-  ok('symmetry', ratio > 0.85 && ratio < 1.0 / 0.85, `ratio ${ratio.toFixed(3)} (0.85–1.18)`);
+  ok('swings-comparable', ratio >= 0.4 && ratio <= 2.5, `ratio ${ratio.toFixed(3)} (must be 0.4–2.5)`);
+  const sym = warn('symmetry', ratio > 0.85 && ratio < 1.0 / 0.85,
+    `ratio ${ratio.toFixed(3)} (ideal 0.85–1.18; outside = one turn over/undershot, scale averaged)`);
   const resid = Math.abs(countsReturn) / Math.max(1, Math.abs(countsPos));
-  ok('return-to-centre', resid <= 0.10,
-    `residual ${(resid * 100).toFixed(1)}% (≤10%; large = acceleration, smoothing or recentering)`);
+  const ret = warn('return-to-centre', resid <= 0.10,
+    `residual ${(resid * 100).toFixed(1)}% (ideal ≤10%; large = turret hit a stop, or acceleration/smoothing)`);
   const valid = checks.every((c) => c.pass);
   const avg = (Math.abs(countsPos) + Math.abs(countsNeg)) / 2;
-  return { valid, checks, degPerCount: valid ? refDeg / avg : null, sign: Math.sign(countsPos) || 1 };
+  return { valid, reliable: valid && sym && ret, checks, degPerCount: valid ? refDeg / avg : null, sign: Math.sign(countsPos) || 1 };
+}
+
+/**
+ * Combine axes. Games normally use one sensitivity for both axes, so when the vertical measurement is
+ * unusable or unreliable (turrets often hit elevation stops) but horizontal is valid, vertical uses the
+ * horizontal scale with the measured vertical sign (or mouse-up = look-up if the sign is unknown).
+ */
+function combineAxes(sx, sy) {
+  const checks = [];
+  let degY = sy.degPerCount, signY = sy.sign, verticalFromHorizontal = false;
+  if (sx.valid && (!sy.valid || !sy.reliable)) {
+    const signKnown = sy.checks.some((c) => c.name === 'opposite-signs' && c.pass);
+    degY = sx.degPerCount; signY = signKnown ? sy.sign : -1; verticalFromHorizontal = true;
+    checks.push({ name: 'vertical-scale', pass: true, warn: true,
+      detail: `vertical measurement unreliable → using horizontal scale (${signKnown ? 'measured' : 'assumed'} direction)` });
+  }
+  const valid = sx.valid && (sy.valid || verticalFromHorizontal);
+  return { valid, degPerCountY: valid ? degY : null, signY, verticalFromHorizontal,
+    approximate: !sx.reliable || verticalFromHorizontal || !sy.reliable, checks };
 }
 
 class MouseTracker {
@@ -80,4 +104,4 @@ class MouseTracker {
   }
 }
 
-module.exports = { CAL_VERSION, emptyCalibration, solveAxis, MouseTracker };
+module.exports = { CAL_VERSION, emptyCalibration, solveAxis, combineAxes, MouseTracker };

@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const config = require('../core/config');
 const P = require('../core/protocol');
-const { MouseTracker, emptyCalibration, solveAxis } = require('../core/tracker');
+const { MouseTracker, emptyCalibration, solveAxis, combineAxes } = require('../core/tracker');
 const { SessionClient } = require('../core/netClient');
 
 // Allows a second instance on one PC for testing: CREWSIGHT_PROFILE=b npm start
@@ -245,17 +245,18 @@ function calFinish() {
   const c = state.cal;
   const sx = solveAxis({ refDeg: c.refX, countsPos: c.marks['x-pos'], countsReturn: c.marks['x-return'], countsNeg: c.marks['x-neg'] });
   let sy;
-  if (c.skipY) sy = { valid: sx.valid, degPerCount: sx.degPerCount, sign: -1,
-    checks: [{ name: 'vertical-assumed', pass: true, detail: 'ASSUMED equal to horizontal scale, mouse-up = look-up (not measured)' }] };
+  if (c.skipY) sy = { valid: sx.valid, reliable: true, degPerCount: sx.degPerCount, sign: -1,
+    checks: [{ name: 'vertical-assumed', pass: true, warn: true, detail: 'ASSUMED equal to horizontal scale, mouse-up = look-up (not measured)' }] };
   else {
     sy = solveAxis({ refDeg: c.refY, countsPos: c.marks['y-pos'], countsReturn: c.marks['y-return'], countsNeg: c.marks['y-neg'] });
     // Mouse "up" yields negative raw dy; the user was asked to look UP for the positive swing.
   }
-  const cal = { ...emptyCalibration(cfg.role), valid: sx.valid && sy.valid,
-    degPerCountX: sx.degPerCount, degPerCountY: sy.degPerCount, signX: sx.sign, signY: sy.sign,
+  const comb = combineAxes(sx, sy);
+  const cal = { ...emptyCalibration(cfg.role), valid: comb.valid, noseOnly: false, approximate: comb.approximate,
+    degPerCountX: sx.degPerCount, degPerCountY: comb.degPerCountY, signX: sx.sign, signY: comb.signY,
     pilotFreelookVk: cfg.role === 'pilot' ? (c.freelookVk || 0x12) : null, recenterOnRelease: c.recenterOnRelease,
-    createdAt: new Date().toISOString(), refX: c.refX, refY: c.skipY ? null : c.refY, verticalAssumed: c.skipY,
-    checks: [...sx.checks.map((k) => ({ axis: 'horizontal', ...k })), ...sy.checks.map((k) => ({ axis: 'vertical', ...k }))] };
+    createdAt: new Date().toISOString(), refX: c.refX, refY: c.skipY ? null : c.refY, verticalAssumed: c.skipY || comb.verticalFromHorizontal,
+    checks: [...sx.checks.map((k) => ({ axis: 'horizontal', ...k })), ...sy.checks.map((k) => ({ axis: 'vertical', ...k })), ...comb.checks] };
   state.cal = null;
   if (cal.valid) { cfg.calibrations[cfg.role] = cal; saveCfg(); applyCalibration(); }
   log('info', 'calibration-finished', { role: cfg.role, valid: cal.valid });

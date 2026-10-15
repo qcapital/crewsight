@@ -97,10 +97,10 @@ $('calReset').onclick = () => ipcRenderer.invoke('reset-calibration');
 $('noseOnly').onclick = () => ipcRenderer.invoke('set-nose-only');
 const STEP_TEXT = {
   'x-zero': 'In game, look straight along the helicopter nose. Press Mark.',
-  'x-pos': () => `Turn your view RIGHT exactly ${$('refX').value}° (e.g. straight out the right side). Press Mark.`,
+  'x-pos': () => `Turn RIGHT about ${$('refX').value}° (it doesn't matter if the gun tilts up or down). Press Mark.`,
   'x-return': 'Turn back to straight along the nose. Press Mark.',
-  'x-neg': () => `Turn your view LEFT exactly ${$('refX').value}°. Press Mark.`,
-  'y-zero': 'Look straight along the nose, level. Press Mark.',
+  'x-neg': () => `Turn LEFT about ${$('refX').value}° from the nose (gun tilt doesn't matter). Press Mark.`,
+  'y-zero': 'Aim as close to straight ahead as the gun allows. Press Mark.',
   'y-pos': () => `Look UP exactly ${$('refY').value}°. Press Mark.`,
   'y-return': 'Return to level along the nose. Press Mark.',
   'y-neg': () => `Look DOWN exactly ${$('refY').value}°. Press Mark.`,
@@ -120,8 +120,8 @@ ipcRenderer.on('cal-state', (_e, c) => {
 });
 ipcRenderer.on('cal-result', (_e, cal) => {
   const el = $('calResult'); el.style.display = 'block';
-  el.textContent = (cal.valid ? 'CALIBRATION VALID\n' : 'CALIBRATION FAILED — not applied\n') +
-    cal.checks.map((k) => `${k.pass ? '✔' : '✘'} ${k.axis || ''} ${k.name}: ${k.detail}`).join('\n') +
+  el.textContent = (cal.valid ? (cal.approximate ? 'CALIBRATION APPLIED (APPROXIMATE — see ⚠ warnings; recalibrate later for better accuracy)\n' : 'CALIBRATION VALID\n') : 'CALIBRATION FAILED — not applied\n') +
+    cal.checks.map((k) => `${!k.pass ? '✘' : k.warn ? '⚠' : '✔'}${k.axis || ''} ${k.name}: ${k.detail}`).join('\n') +
     (cal.valid ? `\n\n${cal.degPerCountX.toFixed(5)} °/count horizontal, ${cal.degPerCountY.toFixed(5)} °/count vertical` : '');
   el.className = cal.valid ? 'ok' : 'bad';
 });
