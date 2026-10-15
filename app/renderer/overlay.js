@@ -161,7 +161,8 @@ ipcRenderer.on('local', (_e, m) => { localSt = m.st; if (p2p && isP2P()) p2p.sen
 // ---------------- own-image motion (gun-limit recording) ----------------
 // Downscaled grayscale frames of MY shared game window; the global shift between frames tells main whether
 // the camera actually moved. Runs only while main asks (limit recording).
-const MW = 96, MH = 54;
+const MW = 160, MH = 90;
+let motionEst = null;
 let motionOn = false, motionTimer = null, motionVideo = null, prevGray = null;
 const mcv = document.createElement('canvas'); mcv.width = MW; mcv.height = MH;
 const mctx = mcv.getContext('2d', { willReadFrequently: true });
@@ -171,13 +172,19 @@ function startMotion() {
   if (!motionOn || !localStream) return;
   motionVideo = motionVideo || document.createElement('video');
   motionVideo.muted = true; motionVideo.srcObject = localStream; motionVideo.play().catch(() => {});
+  motionEst = new RotationEstimator({ w: MW, h: MH, fovH: cfg.hud.fovH });
   motionTimer = setInterval(() => {
     if (motionVideo.readyState < 2) return;
     mctx.drawImage(motionVideo, 0, 0, MW, MH);
     const d = mctx.getImageData(0, 0, MW, MH).data, g = new Uint8Array(MW * MH);
     for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8;
-    if (prevGray) { const r = estimateShift(prevGray, g, MW, MH, 8); ipcRenderer.send('local-motion', { sx: r.sx, sy: r.sy, err: +r.err.toFixed(1) }); }
-    prevGray = g;
+    // Patch-based estimate ignores fixed on-screen parts (gun model, HUD) and reports "unknown" over plain
+    // sky/haze, so the stop detector never throws away real movement just because the picture lacks detail.
+    motionEst.setFov(cfg.hud.fovH);
+    const r = motionEst.push(g);
+    if (!r) return;
+    if (r.conf < 0.3) ipcRenderer.send('local-motion', { unknown: true });
+    else ipcRenderer.send('local-motion', { sx: +(r.yaw * motionEst.f).toFixed(2), sy: +(r.pitch * motionEst.f).toFixed(2), conf: r.conf });
   }, 50);
 }
 ipcRenderer.on('motion', (_e, on) => { motionOn = on; startMotion(); });

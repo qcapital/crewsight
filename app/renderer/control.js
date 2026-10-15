@@ -162,7 +162,9 @@ ipcRenderer.on('limrec', (_e, r) => {
 ipcRenderer.on('limrec-result', (_e, x) => {
   const el = $('limResult'); el.style.display = 'block'; el.className = x.valid ? 'ok' : 'bad';
   el.textContent = (x.valid ? 'GUN LIMITS SAVED\n' : 'NOT SAVED\n') + x.checks.map((k) => `${!k.pass ? '✘' : k.warn ? '⚠' : '✔'} ${k.name}: ${k.detail}`).join('\n') +
-    `\nmethod: ${x.method} · stop-detector ignored ${Math.round(x.blockedFraction * 100)}% of mouse samples`;
+    `\nmethod: ${x.method} · picture motion readable ${x.imageMotionKnownPct}% of the time` +
+    `\nmouse movement ignored as 'at a stop': ` + ['right', 'left', 'up', 'down'].map((k) => `${k} ${x.perDirection[k].ignoredPct}%`).join(' · ') +
+    (Object.values(x.perDirection).some((d) => d.ignoredPct > 60) ? `\n⚠ A lot of movement in one direction was ignored. If the gun really moved there, turn off 'Stop detection from my screen' and record again.` : '');
 });
 function drawLimits() {
   const c = $('limPlot'), g = c.getContext('2d'), W = c.width, H = c.height;

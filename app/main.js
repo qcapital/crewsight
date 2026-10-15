@@ -314,9 +314,10 @@ function limStart() {
   if (cfg.role !== 'gunner') return toControl('toast', 'Gun limits are recorded from the Gunner seat.');
   if (!c.valid || c.noseOnly || !c.degPerCountX) return toControl('toast', 'Calibrate the gunner first (Tracking tab).');
   state.limRec = { step: 'zero', az: 0, el: 0, points: [], lastPt: 0, blockedX: 0, blockedY: 0, deltas: 0, visual: false,
-    detector: new StopDetector(), cal: c, lastBlock: 0 };
+    detector: new StopDetector(), cal: c, lastBlock: 0,
+    moved: { right: 0, left: 0, up: 0, down: 0 }, blocked: { right: 0, left: 0, up: 0, down: 0 }, knownFrames: 0, unknownFrames: 0 };
   if (!state.trackingObserve) setObserve(true);
-  toOverlay('motion', true);
+  if (cfg.tracking.limitStopDetection) toOverlay('motion', true);
   pushLim();
 }
 function limOnDelta(dx, dy) {
@@ -326,6 +327,10 @@ function limOnDelta(dx, dy) {
   r.detector.addMouse(dx, dy, now);
   r.visual = r.visual || f.visual; r.deltas++;
   if (f.blockedX) r.blockedX++; if (f.blockedY) r.blockedY++;
+  // Per-direction totals in screen terms (right = +x after calibration sign, up = -y raw).
+  const sx = dx * r.cal.signX, sy = -dy * (r.cal.signY < 0 ? 1 : -1);
+  if (sx > 0) { r.moved.right += sx; if (f.blockedX) r.blocked.right += sx; } else if (sx < 0) { r.moved.left -= sx; if (f.blockedX) r.blocked.left -= sx; }
+  if (sy > 0) { r.moved.up += sy; if (f.blockedY) r.blocked.up += sy; } else if (sy < 0) { r.moved.down -= sy; if (f.blockedY) r.blocked.down -= sy; }
   if (f.blockedX || f.blockedY) r.lastBlock = now;
   r.az = Math.max(-180, Math.min(180, r.az + (f.dx - (f.undoX || 0)) * r.cal.degPerCountX * r.cal.signX));
   r.el = Math.max(-90, Math.min(90, r.el + (f.dy - (f.undoY || 0)) * r.cal.degPerCountY * r.cal.signY));
@@ -349,6 +354,8 @@ function limFinish() {
   const method = r.visual ? 'visual-stop-detection' : 'manual-follow';
   const result = { ...(env || {}), valid: v.valid, checks: v.checks, method, recordedAt: new Date().toISOString(),
     returnResidualDeg: +residual.toFixed(1), blockedFraction: r.deltas ? +((r.blockedX + r.blockedY) / r.deltas).toFixed(3) : 0,
+    perDirection: Object.fromEntries(['right', 'left', 'up', 'down'].map((k) => [k, { counts: r.moved[k], ignoredPct: r.moved[k] ? Math.round((100 * r.blocked[k]) / r.moved[k]) : 0 }])),
+    imageMotionKnownPct: r.knownFrames + r.unknownFrames ? Math.round((100 * r.knownFrames) / (r.knownFrames + r.unknownFrames)) : 0,
     calibrationCreatedAt: r.cal.createdAt, appVersion: app.getVersion(), trace: r.points.filter((_, i) => i % 3 === 0).map(({ az, el }) => ({ az, el })) };
   if (v.valid) { cfg.gunLimits = result; saveCfg(); tracker.setLimits(cfg.gunLimits); }
   log('info', 'gun-limits-recorded', { valid: v.valid, method, residual: result.returnResidualDeg });
@@ -357,7 +364,7 @@ function limFinish() {
 setInterval(() => { if (state.limRec) pushLim(); }, 100);
 function pushLim() {
   const r = state.limRec;
-  toControl('limrec', r ? { step: r.step, az: r.az, el: r.el, n: r.points.length, visual: r.visual,
+  toControl('limrec', r ? { step: r.step, az: r.az, el: r.el, n: r.points.length, visual: r.visual, moved: r.moved, blocked: r.blocked,
     blocking: performance.now() - r.lastBlock < 150, last: r.points.slice(-8) } : null);
 }
 function validLimitsShape(x) {
@@ -368,7 +375,11 @@ function validLimitsShape(x) {
 ipcMain.on('lim-start', () => limStart());
 ipcMain.on('lim-mark', () => limMark());
 ipcMain.on('lim-cancel', () => { state.limRec = null; toOverlay('motion', false); pushLim(); });
-ipcMain.on('local-motion', (_e, d) => { if (state.limRec && d) state.limRec.detector.addImage(d.sx, d.sy, performance.now()); });
+ipcMain.on('local-motion', (_e, d) => {
+  const r = state.limRec; if (!r || !d) return;
+  if (d.unknown) { r.unknownFrames++; return; } // can't tell: the detector goes unavailable and never blocks
+  r.knownFrames++; r.detector.addImage(d.sx, d.sy, performance.now());
+});
 ipcMain.handle('lim-clear', () => { cfg.gunLimits = null; saveCfg(); tracker.setLimits(null); pushStatus(); });
 ipcMain.handle('lim-export', async () => {
   if (!cfg.gunLimits) return false;

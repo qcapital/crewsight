@@ -60,7 +60,7 @@ class RotationEstimator {
     if (!prev) return null;
     const obs = [];
     for (const c of this.cells) {
-      if (c.still > 8) { c.still -= 0.05; continue; } // learned static region (cockpit): skip, slowly re-test
+      if (c.still > 8) { c.still -= 0.002; continue; } // learned static region (cockpit / gun model): skip, re-test after ~1-2 min
       const m = this._match(prev, gray, c.cx, c.cy);
       if (m) obs.push({ x: c.cx - this.w / 2, y: c.cy - this.h / 2, dx: m.dx, dy: m.dy, cell: c });
     }
@@ -98,7 +98,7 @@ class RotationEstimator {
     const sceneMotion = Math.hypot(p[0], p[1]) * f + Math.abs(p[2]) * this.w / 2;
     for (const o of obs) {
       const still = Math.hypot(o.dx, o.dy) < 0.3;
-      if (sceneMotion > 0.6 && still) o.cell.still += 1; else if (!still) o.cell.still = Math.max(0, o.cell.still - 1);
+      if (sceneMotion > 0.6 && still) o.cell.still = Math.min(40, o.cell.still + 1); else if (!still) o.cell.still = Math.max(0, o.cell.still - 1);
     }
     const conf = inl.length / Math.max(obs.length, 1) * Math.min(1, inl.length / 10);
     if (inl.length < 6) return { yaw: 0, pitch: 0, roll: 0, conf: 0, used: obs.length, reason: 'no-consistent-motion' };
