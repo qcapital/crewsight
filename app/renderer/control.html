@@ -130,9 +130,12 @@ main{padding-bottom:40px}
         <button class="b p" id="calStart">Start calibration</button>
         <button class="b" id="noseOnly">My view is fixed to the nose</button>
         <button class="b" id="calReset">Reset calibration</button>
+        <button class="b" id="restartAdmin" title="Needed when the game runs as administrator">Restart CrewSight as administrator</button>
       </div>
     </div>
     <div id="calRun" style="display:none">
+      <div id="calLive" class="dim" style="margin:4px 0">Mouse input: waiting…</div>
+      <div id="calProblem" class="bad" style="margin:4px 0"></div>
       <ol class="steps" id="calSteps"></ol>
       <div class="row"><button class="b p" id="calMark">Mark (Ctrl+Alt+M)</button><button class="b" id="calCancel">Cancel</button></div>
     </div>

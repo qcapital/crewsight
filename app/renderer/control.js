@@ -92,6 +92,13 @@ $('calStart').onclick = () => {
     freelookVk: parseInt($('vk').value, 16) || 0x12, recenterOnRelease: $('recenter').checked });
 };
 $('calMark').onclick = () => ipcRenderer.send('cal-mark');
+$('restartAdmin').onclick = () => ipcRenderer.invoke('restart-admin');
+ipcRenderer.on('cal-live', (_e, l) => {
+  $('calLive').textContent = `Mouse input since last mark: ${l.moved} counts · reader: ${l.helper}${l.elevated ? ' · game is running as administrator' : ''}`;
+  $('calLive').className = l.moved > 0 ? 'ok' : 'dim';
+  $('calProblem').textContent = l.problem || '';
+});
+ipcRenderer.on('cal-problem', (_e, why) => { $('calProblem').textContent = why; });
 $('calCancel').onclick = () => ipcRenderer.send('cal-cancel');
 $('calReset').onclick = () => ipcRenderer.invoke('reset-calibration');
 $('noseOnly').onclick = () => ipcRenderer.invoke('set-nose-only');
@@ -107,6 +114,7 @@ const STEP_TEXT = {
 };
 ipcRenderer.on('cal-state', (_e, c) => {
   $('calRun').style.display = c ? 'block' : 'none'; $('calSetup').style.display = c ? 'none' : 'block';
+  if (!c) $('calProblem').textContent = '';
   if (!c) return;
   const keys = Object.keys(STEP_TEXT).filter((k) => !(c.skipY && k.startsWith('y')));
   const pilot = cfg.role === 'pilot' ? ' (hold your free-look key while turning)' : '';

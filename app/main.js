@@ -221,11 +221,12 @@ function onHelperLine(line) {
   if (k === 'M') {
     const dx = Number(a), dy = Number(b);
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
-    tracker.addDelta(dx, dy);
-    if (state.cal) { state.cal.cx += dx; state.cal.cy += dy; }
+    if (state.cal) { state.cal.cx += dx; state.cal.cy += dy; state.cal.moved += Math.abs(dx) + Math.abs(dy); }
+    try { tracker.addDelta(dx, dy); } catch (e) { log('error', 'tracker-delta', { e: String(e.message) }); }
     if (state.limRec) limOnDelta(dx, dy);
   } else if (k === 'K') tracker.setFreelook(a === '1');
   else if (k === 'F') { tracker.focusOk = cfg.tracking.foregroundFilter ? a === '1' : true; pushStatus(); }
+  else if (k === 'G') { state.fgElevated = a === '1'; pushStatus(); }
   else if (k === 'E') { state.helperStatus = 'error ' + a; pushStatus(); }
 }
 
@@ -233,14 +234,27 @@ function onHelperLine(line) {
 // Steps per axis: zero -> pos -> return -> neg. Marks come from the UI button or the calMark hotkey.
 const CAL_STEPS = ['x-zero', 'x-pos', 'x-return', 'x-neg', 'y-zero', 'y-pos', 'y-return', 'y-neg'];
 function calStart(opts) {
-  state.cal = { step: 0, cx: 0, cy: 0, base: 0, marks: {}, refX: Number(opts.refX) || 90, refY: Number(opts.refY) || 45,
+  state.cal = { step: 0, cx: 0, cy: 0, base: 0, marks: {}, moved: 0, refX: Number(opts.refX) || 90, refY: Number(opts.refY) || 45,
     skipY: !!opts.skipY, freelookVk: opts.freelookVk, recenterOnRelease: opts.recenterOnRelease !== false };
   if (!state.trackingObserve) setObserve(true); else restartHelper();
   pushCal();
 }
+function inputProblem() {
+  if (state.helperStatus === 'missing') return 'The mouse reader (RawMouse.exe) is missing — antivirus may have removed it. Re-extract the zip or allow it.';
+  if (state.helperStatus !== 'running') return `The mouse reader isn't running (${state.helperStatus}). Antivirus may be blocking RawMouse.exe.`;
+  if (state.fgElevated) return 'WarDogs is running with administrator rights, so Windows hides its mouse input from CrewSight. Click "Restart CrewSight as administrator" (Tracking tab).';
+  return 'No mouse movement reached CrewSight. Check Diagnostics → inputHelper, or try "Restart CrewSight as administrator".';
+}
 function calMark() {
   const c = state.cal; if (!c) return;
   const name = CAL_STEPS[c.step];
+  // Every turn step must have produced mouse movement; otherwise say why instead of finishing with zeros.
+  if (!name.endsWith('zero') && c.moved < 20) {
+    const why = inputProblem();
+    log('warn', 'cal-mark-no-input', { step: name, helper: state.helperStatus, elevated: !!state.fgElevated });
+    toControl('toast', 'Mark ignored: ' + why); toControl('cal-problem', why); return;
+  }
+  c.moved = 0;
   const axis = name[0];
   const cur = axis === 'x' ? c.cx : c.cy;
   if (name.endsWith('zero')) c.base = cur; else c.marks[name] = cur - c.base;
@@ -270,6 +284,26 @@ function calFinish() {
   toControl('cal-result', cal); pushCal(); pushStatus();
 }
 function pushCal() { toControl('cal-state', state.cal ? { step: CAL_STEPS[state.cal.step], index: state.cal.step, skipY: state.cal.skipY } : null); }
+// Live input feedback while calibrating: counts since the last mark and why input might be missing.
+setInterval(() => {
+  if (!state.cal) return;
+  toControl('cal-live', { moved: state.cal.moved, helper: state.helperStatus, elevated: !!state.fgElevated,
+    problem: state.helperStatus !== 'running' || state.fgElevated ? inputProblem() : null });
+}, 150);
+function isAdmin() {
+  try { require('child_process').execFileSync('net', ['session'], { stdio: 'ignore', windowsHide: true }); return true; } catch { return false; }
+}
+ipcMain.handle('is-admin', () => isAdmin());
+ipcMain.handle('restart-admin', () => {
+  // Relaunch this exact executable elevated (Windows asks the user), then quit this instance.
+  const exe = process.execPath;
+  const args = process.defaultApp ? [path.resolve(process.argv[1] || '.')] : [];
+  const argList = args.length ? ` -ArgumentList '${args.map((a) => '"' + a.replace(/'/g, "''") + '"').join(' ')}'` : '';
+  const ps = spawn('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', `Start-Process -FilePath '${exe.replace(/'/g, "''")}'${argList} -Verb RunAs`],
+    { detached: true, stdio: 'ignore', windowsHide: true });
+  ps.on('exit', (code) => { if (code === 0) { app.isQuitting = true; app.releaseSingleInstanceLock(); app.quit(); } });
+  return true;
+});
 
 // ---------- gun limit recording ----------
 // Gunner zeroes on the nose, traces the outer limits of where the gun can point, returns to the nose.
@@ -430,7 +464,7 @@ function pushStatus() {
   broadcast('status', {
     role: cfg.role, overlayVisible: state.overlayVisible, clickThrough: state.clickThrough,
     trackingObserve: state.trackingObserve, trackingMode: cfg.tracking.mode, helperStatus: state.helperStatus,
-    focusOk: tracker.focusOk, hotkeyFailures: state.hotkeyFailures, session: { ...state.session },
+    focusOk: tracker.focusOk, fgElevated: !!state.fgElevated, hotkeyFailures: state.hotkeyFailures, session: { ...state.session },
     calibration: { valid: c.valid, noseOnly: !!c.noseOnly, createdAt: c.createdAt, verticalAssumed: !!c.verticalAssumed, approximate: !!c.approximate },
     gunLimits: cfg.gunLimits ? { azMin: cfg.gunLimits.azMin, azMax: cfg.gunLimits.azMax, bins: cfg.gunLimits.bins, trace: cfg.gunLimits.trace, recordedAt: cfg.gunLimits.recordedAt || cfg.gunLimits.importedAt, method: cfg.gunLimits.method, returnResidualDeg: cfg.gunLimits.returnResidualDeg } : null,
     capture: state.capture,

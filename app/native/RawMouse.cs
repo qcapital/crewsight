@@ -5,6 +5,7 @@
 //   M <dx> <dy>        aggregated relative mouse counts since last line
 //   K <0|1>            state of the ONE key passed via --vk (e.g. free-look); no other keys reported
 //   F <0|1>            whether the foreground window's process name contains --fg filter
+//   G <0|1>            foreground app runs elevated (admin) while we don't: Windows then withholds its input
 //   H                  heartbeat every second
 // Build: scripts/build-native.ps1 (uses csc.exe from .NET Framework 4, present on Windows 10/11).
 using System;
@@ -23,11 +24,16 @@ static class RawMouse
     [DllImport("user32.dll")] static extern uint GetRawInputData(IntPtr h, uint cmd, IntPtr data, ref uint size, uint hdrSize);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr token);
+    [DllImport("advapi32.dll")] static extern bool GetTokenInformation(IntPtr t, int cls, out int info, int len, out int ret);
 
     const int WM_INPUT = 0x00FF; const uint RID_INPUT = 0x10000003; const uint RIDEV_INPUTSINK = 0x100;
     const ushort MOUSE_MOVE_ABSOLUTE = 1; const ushort RI_KEY_BREAK = 1;
 
-    static long dx, dy; static int vk = -1; static bool keyDown; static string fg = ""; static int lastFocus = -1;
+    static long dx, dy; static int vk = -1; static bool keyDown; static string fg = ""; static int lastFocus = -1; static int lastElev = -1;
 
     class Sink : NativeWindow
     {
@@ -71,6 +77,23 @@ static class RawMouse
         finally { Marshal.FreeHGlobal(buf); }
     }
 
+    // 1 = process token says elevated, or we can't even open its token (protected/elevated); 0 = not elevated.
+    static int Elevated(IntPtr proc)
+    {
+        IntPtr tok;
+        if (proc == IntPtr.Zero || !OpenProcessToken(proc, 0x0008 /*TOKEN_QUERY*/, out tok)) return 1;
+        int elev, ret; bool ok = GetTokenInformation(tok, 20 /*TokenElevation*/, out elev, 4, out ret);
+        CloseHandle(tok);
+        return ok && elev != 0 ? 1 : 0;
+    }
+    static int ForegroundElevatedVsUs()
+    {
+        uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        if (pid == 0) return 0;
+        IntPtr h = OpenProcess(0x1000 /*PROCESS_QUERY_LIMITED_INFORMATION*/, false, pid);
+        int fgElev = Elevated(h); if (h != IntPtr.Zero) CloseHandle(h);
+        return fgElev == 1 && Elevated(GetCurrentProcess()) == 0 ? 1 : 0;
+    }
     static int FocusMatches()
     {
         if (fg.Length == 0) return 1;
@@ -108,6 +131,8 @@ static class RawMouse
             {
                 int f = FocusMatches();
                 if (f != lastFocus) { lastFocus = f; Console.Out.WriteLine("F " + f); }
+                int g = ForegroundElevatedVsUs();
+                if (g != lastElev) { lastElev = g; Console.Out.WriteLine("G " + g); }
             }
             if (ticks % 100 == 0) Console.Out.WriteLine("H");
             Console.Out.Flush();
