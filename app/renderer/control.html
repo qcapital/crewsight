@@ -152,6 +152,15 @@ main{padding-bottom:40px}
       <input type="number" data-k="overlay.crop.x" min="0" max="0.9" step="0.01"><input type="number" data-k="overlay.crop.y" min="0" max="0.9" step="0.01">
       <input type="number" data-k="overlay.crop.w" min="0.1" max="1" step="0.01"><input type="number" data-k="overlay.crop.h" min="0.1" max="1" step="0.01"></label>
   </div>
+  <h3>Crew dot on my screen (HUD)</h3>
+  <div class="card">
+    <div class="dim">Draws your crew member's look/aim point directly over YOUR game, placed in your own view (Ctrl+Alt+H). Always click-through.</div>
+    <label><span>Show on my screen</span><input type="checkbox" data-k="hud.enabled"></label>
+    <label><span>Game monitor</span><select id="hudDisplay"></select></label>
+    <label><span>Game horizontal FOV (°)</span><input type="number" data-k="hud.fovH" min="30" max="170"></label>
+    <label><span>Show name label</span><input type="checkbox" data-k="hud.showLabel"></label>
+    <div class="dim">Set FOV to the game's vehicle FOV (Settings → First Person FOV – Vehicles). A wrong FOV puts the dot in the right direction but too near or far from centre. Quick check: both look at the same object; the dot should sit on it.</div>
+  </div>
   <h3>Dot</h3>
   <div class="card">
     <label><span>Colour</span><input type="color" data-k="dot.color"></label>

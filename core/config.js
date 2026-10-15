@@ -15,6 +15,8 @@ const DEFAULTS = Object.freeze({
     crop: { x: 0, y: 0, w: 1, h: 1 } },
   // In-app screen share of the LOCAL player's game window, sent peer-to-peer (WebRTC).
   share: { lastSourceName: null, autoReattach: true, maxWidth: 1280, maxFps: 30, maxBitrateKbps: 2500 },
+  // Crew member's dot drawn on MY game screen. fovH must match the game's horizontal field of view.
+  hud: { enabled: true, displayId: null, fovH: 90, showLabel: true },
   dot: { color: '#ff3b30', size: 14, opacity: 0.95, halo: true, hideWhenStale: false },
   projection: { mode: 'linear', azMax: 90, elMax: 45, centerX: 0.5, centerY: 0.5 },
   smoothing: { interpolate: true, interpDelayMs: 40, visualTauMs: 30 },
@@ -26,7 +28,7 @@ const DEFAULTS = Object.freeze({
   tracking: { mode: 'mouse', observeInput: false, foregroundFilter: 'WarDogs' },
   hotkeys: { toggleOverlay: 'Ctrl+Alt+O', toggleClickThrough: 'Ctrl+Alt+C',
     openSettings: 'Ctrl+Alt+S', recalibrate: 'Ctrl+Alt+R', toggleTracking: 'Ctrl+Alt+T',
-    zero: 'Ctrl+Alt+Z', calMark: 'Ctrl+Alt+M' },
+    zero: 'Ctrl+Alt+Z', calMark: 'Ctrl+Alt+M', toggleHud: 'Ctrl+Alt+H' },
   calibrations: { pilot: null, gunner: null },
 });
 

@@ -70,4 +70,42 @@ function toPixels(pt, rect) {
   return { px: rect.x + pt.x * rect.w, py: rect.y + pt.y * rect.h };
 }
 
-module.exports = { wrapDeg, project, contentRect, toPixels, DEFAULT_PROJECTION, isFiniteNum };
+/**
+ * Where does a crew member's look direction appear on MY screen?
+ * target, view: { az, el } in degrees relative to the helicopter nose (same convention as above).
+ * view is where MY camera points (pilot: 0,0 = nose; gunner: own tracked aim). fovH = game's horizontal FOV,
+ * aspect = my screen width/height. Perspective (pinhole) projection; camera roll relative to the airframe is
+ * assumed zero. Ignores parallax between seats (fine for targets more than ~50 m away).
+ * Returns { x, y, inView, ax, ay } with x,y normalised to my screen; when not in view, x,y are clamped to the
+ * edge and (ax, ay) is the unit direction to point an edge arrow.
+ */
+function projectIntoView(target, view, fovH, aspect) {
+  if (!target || !view || ![target.az, target.el, view.az, view.el, fovH, aspect].every(isFiniteNum)) return null;
+  if (!(fovH > 1 && fovH < 179 && aspect > 0)) return null;
+  const r = Math.PI / 180;
+  const dir = (a, e) => [Math.cos(e * r) * Math.cos(a * r), Math.cos(e * r) * Math.sin(a * r), Math.sin(e * r)];
+  const d = dir(target.az, target.el);
+  const va = view.az * r, ve = view.el * r;
+  const f = dir(view.az, view.el);
+  const right = [-Math.sin(va), Math.cos(va), 0];
+  const up = [-Math.sin(ve) * Math.cos(va), -Math.sin(ve) * Math.sin(va), Math.cos(ve)];
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cf = dot(d, f), cr = dot(d, right), cu = dot(d, up);
+  const th = Math.tan((fovH / 2) * r), tv = th / aspect;
+  const n = Math.hypot(cr, cu) || 1;
+  if (cf <= 1e-3) {
+    // Behind the camera: arrow toward the shortest way round, pinned to the screen edge.
+    const ax = cr / n, ay = -cu / n;
+    const k = 0.5 / Math.max(Math.abs(ax), Math.abs(ay), 1e-9);
+    return { x: 0.5 + ax * k, y: 0.5 + ay * k, inView: false, ax, ay };
+  }
+  const x = 0.5 + 0.5 * (cr / cf) / th;
+  const y = 0.5 - 0.5 * (cu / cf) / tv;
+  const inView = x >= 0 && x <= 1 && y >= 0 && y <= 1;
+  if (inView) return { x, y, inView, ax: 0, ay: 0 };
+  const dx = x - 0.5, dy = y - 0.5, m = Math.hypot(dx, dy);
+  const k = 0.5 / Math.max(Math.abs(dx), Math.abs(dy));
+  return { x: 0.5 + dx * k, y: 0.5 + dy * k, inView: false, ax: dx / m, ay: dy / m };
+}
+
+module.exports = { projectIntoView, wrapDeg, project, contentRect, toPixels, DEFAULT_PROJECTION, isFiniteNum };

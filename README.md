@@ -1,5 +1,7 @@
 # CrewSight — WarDogs pilot/gunner viewpoint overlay
 
+**New in 0.2.0: your crew member's dot is drawn directly over YOUR game screen.** The pilot sees a red dot exactly where the gunner is aiming. The gunner sees where the pilot is looking (the nose). When the point is off-screen, an arrow at the screen edge points the way. Toggle it with `Ctrl+Alt+H`. Before playing, set **Overlay & dot → Game horizontal FOV** to the game's vehicle FOV.
+
 CrewSight is a floating, always-on-top window. It shows your crew member's game screen and a **dot marking where they are looking**, relative to the helicopter's nose. Each of you shares your own game window from inside the app, and the lobby code connects you. No Discord is needed.
 
 **What it does not do:** it does not read or modify the game, inject input, automate anything, or record anything. The dot is an **estimate**: the label next to it always tells you where the estimate comes from.
@@ -56,6 +58,7 @@ An arrow at the edge means they are looking beyond the angles set in **Projectio
 | `Ctrl+Alt+T` | Mouse observation on/off |
 | `Ctrl+Alt+Z` | Re-zero |
 | `Ctrl+Alt+M` | Calibration mark |
+| `Ctrl+Alt+H` | Crew dot on my screen (HUD) on/off |
 
 Conflicts are listed on the Hotkeys tab. The tray menu provides the same toggles.
 
@@ -75,7 +78,16 @@ Conflicts are listed on the Hotkeys tab. The tray menu provides the same toggles
 - **The dot drifts:** press re-zero. If the drift is large, recalibrate, and check that the turret did not hit a stop during the swing.
 - **Corrupt settings:** they are reset automatically and the old file is backed up. Hotkeys tab → Reset ALL resets manually.
 
+## Helicopter manoeuvres (roll, pitch, yaw)
+Both players' directions are shared **relative to the helicopter's nose**. Both cameras are attached to the same airframe, so when the helicopter rolls, pitches or yaws, both views and the shared directions turn together. The dot stays on the true point with no correction needed, and network delay adds no error while manoeuvring. This is tested against a 3D simulation with 500 random attitudes and is exact.
+
+It relies on two game behaviours that need a 1-minute in-game check (please report the results):
+1. **Gunner turret not gyro-stabilised.** The gunner puts the crosshair on a distant landmark, keeps the mouse still, and the pilot yaws 90°. If the crosshair swings with the helicopter, all is good. If it stays locked on the landmark, the turret is stabilised: the gunner's dot will then drift during manoeuvres until they re-zero (`Ctrl+Alt+Z` while aiming at the nose).
+2. **Cameras roll with the helicopter.** The pilot rolls hard. If the horizon tilts on both screens, all is good. If the game keeps the horizon level, the dot will be rotated by the roll angle.
+
 ## Known limitations
+- **Gunner calibration:** the pilot's HUD works with no setup. The gunner must calibrate mouse tracking; otherwise the gunner's own aim is unknown, so the gunner's HUD cannot place the pilot's dot, and the pilot's HUD cannot place the gunner's.
+- **HUD accuracy:** the HUD assumes the game's horizontal FOV is set correctly and ignores the few metres between the two seats. Very close targets will be slightly off.
 - **Accuracy:** in-game accuracy is **unmeasured**. The control model comes from community guides, not official docs ([docs/FEASIBILITY.md](docs/FEASIBILITY.md)).
 - **Drift:** dead-reckoning drifts. It cannot detect respawns, seat swaps, turret limits or in-game recentering.
 - **No visual tracking:** computer-vision tracking was evaluated and not built. There is no legible heading instrument to read.

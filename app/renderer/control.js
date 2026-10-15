@@ -30,7 +30,7 @@ function fillFields() {
   });
   $('role').value = cfg.role; $('relayUrl').value = cfg.relayUrl;
   $('firstRun').style.display = cfg.firstRunDone ? 'none' : 'block';
-  renderHotkeys(); relayWarn();
+  renderHotkeys(); relayWarn(); fillDisplays();
   $('relayRow').style.display = cfg.network.transport === 'relay' ? '' : 'none';
 }
 document.querySelectorAll('[data-k]').forEach((el) => el.addEventListener('change', async () => {
@@ -41,6 +41,14 @@ document.querySelectorAll('[data-k]').forEach((el) => el.addEventListener('chang
   }
   cfg = await ipcRenderer.invoke('set-config', patchFor(el.dataset.k, v)); fillFields();
 }));
+
+async function fillDisplays() {
+  const sel = $('hudDisplay'); const list = await ipcRenderer.invoke('list-displays');
+  sel.innerHTML = '';
+  for (const d of list) { const o = document.createElement('option'); o.value = d.id; o.textContent = d.label; sel.append(o); }
+  sel.value = cfg.hud.displayId && list.some((d) => d.id === String(cfg.hud.displayId)) ? String(cfg.hud.displayId) : (list.find((d) => d.label.includes('primary')) || list[0]).id;
+}
+$('hudDisplay').onchange = async () => { cfg = await ipcRenderer.invoke('set-config', { hud: { ...cfg.hud, displayId: $('hudDisplay').value } }); };
 
 // ---------- lobby ----------
 function relayWarn() {
@@ -136,7 +144,7 @@ $('ctOff').onclick = () => ipcRenderer.send('set-click-through', false);
 
 // ---------- hotkeys ----------
 const HK_LABELS = { toggleOverlay: 'Show / hide overlay', toggleClickThrough: 'Toggle click-through', openSettings: 'Open settings',
-  recalibrate: 'Recalibrate', toggleTracking: 'Toggle mouse observation', zero: 'Re-zero to nose', calMark: 'Calibration mark' };
+  recalibrate: 'Recalibrate', toggleTracking: 'Toggle mouse observation', zero: 'Re-zero to nose', calMark: 'Calibration mark', toggleHud: 'Crew dot on my screen' };
 function renderHotkeys() {
   const box = $('hkList'); box.innerHTML = '';
   for (const [k, label] of Object.entries(HK_LABELS)) {

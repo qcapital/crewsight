@@ -33,9 +33,11 @@ const electron = require('electron');
       outOfOrderRejected: d.stats && d.stats.rejectedOld, gaps: d.stats && d.stats.gaps,
       videoState: d.pcState, videoSize: d.videoSize, videoFps: d.peerFps, myShare: d.shareStatus,
       rttMs: d.rttMs != null ? Math.round(d.rttMs * 10) / 10 : null,
+      hudDrawn: r.hud ? `${r.hud.hudDrawn}/${r.hud.hudSamples}` : null, hudLast: r.hud && r.hud.hudLast,
     };
     const pass = checks.sessionConnected && checks.viewpointLive && checks.viewpointRateHz >= 15 &&
-      checks.videoState === 'connected' && d.videoSize && d.videoSize[0] > 0 && checks.videoFps > 0;
+      checks.videoState === 'connected' && d.videoSize && d.videoSize[0] > 0 && checks.videoFps > 0 &&
+      r.hud && r.hud.hudDrawn > r.hud.hudSamples / 2;
     ok = ok && pass;
     if (r.metrics && r.metrics.length) {
       const ms = r.metrics.slice(1); // skip startup sample

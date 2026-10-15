@@ -141,7 +141,7 @@ function ensureP2P() {
   if (p2p) return p2p;
   p2p = new P2PSession({ iceServers: cfg.network.iceServers, broker: cfg.network.broker });
   p2p.on('status', (s) => { p2pStatus = s; ipcRenderer.send('p2p-status', s); if (!s.seats || !s.seats[s.role === 'pilot' ? 'gunner' : 'pilot']) remote.reset(); renderLink(); });
-  p2p.on('viewpoint', (m) => remote.accept(m, performance.now()));
+  p2p.on('viewpoint', (m) => { remote.accept(m, performance.now()); ipcRenderer.send('remote-vp', m); });
   p2p.on('stream', (s) => { video.srcObject = s; if (s) video.play().catch(() => {}); renderLink(); });
   if (localStream) p2p.setLocalStream(localStream, cfg.share);
   return p2p;

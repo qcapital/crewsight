@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs'); const os = require('os'); const path = require('path');
-const { project, wrapDeg, contentRect, toPixels } = require('../core/projection');
+const { project, projectIntoView, wrapDeg, contentRect, toPixels } = require('../core/projection');
 const P = require('../core/protocol');
 const { RemoteViewpoint, Smoother } = require('../core/remoteState');
 const { solveAxis, MouseTracker, emptyCalibration } = require('../core/tracker');
@@ -149,4 +149,56 @@ test('config: defaults, corrupt recovery, type-safe merge', () => {
   config.save(f, { ...r.config, role: 'pilot', dot: { size: 'big', color: '#fff' } });
   const l = config.load(f).config; assert.equal(l.role, 'pilot'); assert.equal(l.dot.size, 14); assert.equal(l.dot.color, '#fff');
   fs.writeFileSync(f, JSON.stringify({ schemaVersion: 99 })); assert.ok(config.load(f).recovered);
+});
+
+test('projectIntoView: pilot screen shows gunner aim', () => {
+  const pilotView = { az: 0, el: 0 };
+  const c = projectIntoView({ az: 0, el: 0 }, pilotView, 90, 16 / 9); near(c.x, 0.5); near(c.y, 0.5); assert.ok(c.inView);
+  const r = projectIntoView({ az: 45, el: 0 }, pilotView, 90, 16 / 9); near(r.x, 1, 1e-9); near(r.y, 0.5); // 45° = edge at 90° HFOV
+  const q = projectIntoView({ az: 20, el: 10 }, pilotView, 90, 16 / 9);
+  assert.ok(q.x > 0.5 && q.y < 0.5 && q.inView, 'right+up lands right+up');
+  const side = projectIntoView({ az: -90, el: 0 }, pilotView, 90, 16 / 9);
+  assert.equal(side.inView, false); near(side.x, 0); assert.ok(side.ax < 0, 'arrow points left');
+  const behind = projectIntoView({ az: 170, el: 0 }, pilotView, 90, 16 / 9);
+  assert.equal(behind.inView, false); assert.ok(behind.ax > 0, 'behind-right arrow points right');
+});
+test('projectIntoView: gunner screen shows pilot nose relative to own aim', () => {
+  // Gunner aiming 60° right: the nose (pilot's look) is to the gunner's LEFT.
+  const p = projectIntoView({ az: 0, el: 0 }, { az: 60, el: 0 }, 100, 16 / 9);
+  assert.ok(p.x < 0.5); assert.equal(p.inView, false); // 60° > 50° half-FOV -> edge arrow left
+  const p2 = projectIntoView({ az: 0, el: 0 }, { az: 20, el: -15 }, 100, 16 / 9);
+  assert.ok(p2.inView && p2.x < 0.5 && p2.y < 0.5, 'nose appears left and up when aiming right and down');
+  // Same direction as own view -> centre, regardless of elevation.
+  const s = projectIntoView({ az: 30, el: 40 }, { az: 30, el: 40 }, 100, 16 / 9); near(s.x, 0.5); near(s.y, 0.5);
+  assert.equal(projectIntoView({ az: NaN, el: 0 }, { az: 0, el: 0 }, 90, 1.7), null);
+});
+
+// Ground-truth manoeuvre simulation: a world-fixed target, a helicopter at arbitrary roll/pitch/yaw,
+// gunner aiming at the target. The pilot's TRUE screen position of the target (camera rigidly on the nose)
+// must equal what CrewSight draws from the shared nose-relative angles, for every attitude.
+test('manoeuvres: nose-relative sharing stays exact under any roll/pitch/yaw', () => {
+  const r = Math.PI / 180;
+  const mul = (A, B) => A.map((row) => [0, 1, 2].map((j) => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j]));
+  const app = (A, v) => A.map((row) => row[0] * v[0] + row[1] * v[1] + row[2] * v[2]);
+  const T = (A) => [0, 1, 2].map((i) => [0, 1, 2].map((j) => A[j][i]));
+  // Body axes: x forward (nose), y right, z up. Attitude = yaw(z) * pitch(y) * roll(x).
+  const Rz = (a) => [[Math.cos(a), -Math.sin(a), 0], [Math.sin(a), Math.cos(a), 0], [0, 0, 1]];
+  const Ry = (a) => [[Math.cos(a), 0, -Math.sin(a)], [0, 1, 0], [Math.sin(a), 0, Math.cos(a)]]; // +a = nose up
+  const Rx = (a) => [[1, 0, 0], [0, Math.cos(a), Math.sin(a)], [0, -Math.sin(a), Math.cos(a)]]; // +a = right roll
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 500; i++) {
+    const R = mul(mul(Rz((rnd() * 360 - 180) * r), Ry((rnd() * 120 - 60) * r)), Rx((rnd() * 180 - 90) * r)); // body -> world
+    const tgtWorld = [rnd() * 2 - 1, rnd() * 2 - 1, rnd() * 2 - 1];
+    const n = Math.hypot(...tgtWorld); const w = tgtWorld.map((x) => x / n);
+    // Gunner's aim in body frame (what the gunner's tracker reports):
+    const b = app(T(R), w);
+    const az = Math.atan2(b[1], b[0]) / r, el = Math.asin(Math.max(-1, Math.min(1, b[2]))) / r;
+    // TRUTH: pilot camera = body frame; pinhole projection of the world target.
+    const fov = 100, aspect = 16 / 9, th = Math.tan((fov / 2) * r);
+    if (b[0] <= 0.05) continue; // behind the pilot: arrow case, covered elsewhere
+    const tx = 0.5 + 0.5 * (b[1] / b[0]) / th, ty = 0.5 - 0.5 * (b[2] / b[0]) / (th / aspect);
+    const got = projectIntoView({ az, el }, { az: 0, el: 0 }, fov, aspect);
+    if (tx < 0 || tx > 1 || ty < 0 || ty > 1) { assert.equal(got.inView, false); continue; }
+    near(got.x, tx, 1e-9); near(got.y, ty, 1e-9);
+  }
 });

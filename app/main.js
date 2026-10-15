@@ -16,7 +16,7 @@ if (!app.requestSingleInstanceLock()) { app.quit(); }
 
 const CONFIG_FILE = () => path.join(app.getPath('userData'), 'config.json');
 const LOG_FILE = () => path.join(app.getPath('userData'), 'crewsight.log');
-let cfg, overlayWin, controlWin, tray, helper = null;
+let cfg, overlayWin, controlWin, hudWin, tray, helper = null;
 const state = {
   overlayVisible: true, clickThrough: false, trackingObserve: false,
   hotkeyFailures: [], helperStatus: 'stopped', helperLastBeat: 0,
@@ -35,6 +35,7 @@ function log(level, msg, data) {
 function saveCfg() { try { config.save(CONFIG_FILE(), cfg); } catch (e) { log('error', 'config-save', { e: e.message }); } }
 const toControl = (ch, d) => controlWin && !controlWin.isDestroyed() && controlWin.webContents.send(ch, d);
 const toOverlay = (ch, d) => overlayWin && !overlayWin.isDestroyed() && overlayWin.webContents.send(ch, d);
+const toHud = (ch, d) => hudWin && !hudWin.isDestroyed() && hudWin.webContents.send(ch, d);
 const broadcast = (ch, d) => { toControl(ch, d); toOverlay(ch, d); };
 
 function activeCalibration() {
@@ -67,6 +68,34 @@ function createOverlay() {
   overlayWin.on('moved', persist); overlayWin.on('resized', persist);
   overlayWin.on('closed', () => { overlayWin = null; });
 }
+// Full-screen, permanently click-through HUD on the game's monitor: crew member's dot in MY view.
+function hudDisplay() {
+  const all = screen.getAllDisplays();
+  return all.find((d) => String(d.id) === String(cfg.hud.displayId)) || screen.getPrimaryDisplay();
+}
+function createHud() {
+  if (hudWin && !hudWin.isDestroyed()) hudWin.destroy();
+  const b = hudDisplay().bounds;
+  hudWin = new BrowserWindow({ x: b.x, y: b.y, width: b.width, height: b.height, frame: false, transparent: true,
+    alwaysOnTop: true, skipTaskbar: true, focusable: false, resizable: false, movable: false, hasShadow: false, show: false,
+    title: 'CrewSight HUD', webPreferences: { nodeIntegration: true, contextIsolation: false, backgroundThrottling: false } });
+  hudWin.setAlwaysOnTop(true, 'screen-saver');
+  hudWin.setIgnoreMouseEvents(true);
+  hudWin.loadFile(path.join(__dirname, 'renderer', 'hud.html'));
+  hudWin.once('ready-to-show', () => {
+    hudWin.setBounds(b); // exact fit even when the display scale differs from the primary
+    if (cfg.hud.enabled) hudWin.showInactive();
+    if (!process.env.CREWSIGHT_NO_CONTENT_PROTECTION) hudWin.setContentProtection(true);
+    pushOverlayConfig();
+  });
+  hudWin.on('closed', () => { hudWin = null; });
+}
+function setHudEnabled(on) {
+  cfg.hud.enabled = on; saveCfg(); pushOverlayConfig();
+  if (hudWin) on ? hudWin.showInactive() : hudWin.hide();
+  pushStatus(); refreshTray();
+}
+
 function createControl() {
   if (controlWin && !controlWin.isDestroyed()) { controlWin.show(); controlWin.focus(); return; }
   controlWin = new BrowserWindow({
@@ -78,6 +107,7 @@ function createControl() {
   controlWin.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); controlWin.hide(); } });
 }
 function pushOverlayConfig() {
+  toHud('config', { hud: cfg.hud, dot: cfg.dot, smoothing: cfg.smoothing, network: cfg.network, role: cfg.role });
   toOverlay('config', { overlay: cfg.overlay, dot: cfg.dot, projection: cfg.projection, smoothing: cfg.smoothing,
     network: cfg.network, role: cfg.role, share: cfg.share });
   toOverlay('mode', { clickThrough: state.clickThrough });
@@ -113,6 +143,7 @@ function registerHotkeys() {
     toggleTracking: () => setObserve(!state.trackingObserve),
     zero: () => { tracker.zero(performance.now()); toControl('toast', 'Tracking re-zeroed to the nose'); },
     calMark: () => calMark(),
+    toggleHud: () => setHudEnabled(!cfg.hud.enabled),
   };
   for (const [name, fn] of Object.entries(actions)) {
     const acc = cfg.hotkeys[name];
@@ -131,6 +162,7 @@ function refreshTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open CrewSight', click: createControl },
     { label: state.overlayVisible ? 'Hide overlay' : 'Show overlay', click: () => setOverlayVisible(!state.overlayVisible) },
+    { label: 'Crew dot on my screen (HUD)', type: 'checkbox', checked: !!(cfg && cfg.hud.enabled), click: (i) => setHudEnabled(i.checked) },
     { label: 'Click-through', type: 'checkbox', checked: state.clickThrough, click: (i) => setClickThrough(i.checked) },
     { label: 'Observe my mouse for tracking', type: 'checkbox', checked: state.trackingObserve, click: (i) => setObserve(i.checked) },
     { type: 'separator' },
@@ -260,6 +292,7 @@ function startLoop() {
     if (net.state === 'connected') net.sendViewpoint(msg);
     toControl('local', { ...msg, freelook: tracker.freelookHeld, focusOk: tracker.focusOk });
     toOverlay('local', msg);
+    toHud('local', msg);
   }, 1000 / hz);
 }
 
@@ -269,10 +302,12 @@ net.on('joined', (j) => { state.session.code = P.formatCode(j.code); state.sessi
 net.on('presence', (seats) => { state.session.seats = seats; pushStatus(); });
 net.on('rtt', (ms) => { state.session.rttMs = ms; });
 net.on('error', (code) => { state.session.error = code; log('warn', 'net-error', { code }); pushStatus(); });
-net.on('viewpoint', (m) => toOverlay('remote', m));
+net.on('viewpoint', (m) => { toOverlay('remote', m); toHud('remote', m); });
+ipcMain.on('remote-vp', (_e, m) => toHud('remote', m)); // P2P: overlay renderer owns the data channel
 net.on('signal', (s) => toOverlay('signal', s));
 function pushPeer() {
   const s = state.session; const other = s.role === 'pilot' ? 'gunner' : 'pilot';
+  if (!(s.seats && s.seats[other])) toHud('reset-remote');
   toOverlay('peer', { inSession: s.state === 'connected', present: !!(s.seats && s.seats[other]), polite: s.role === 'gunner' });
 }
 
@@ -291,11 +326,13 @@ function pushStatus() {
 // ---------- IPC ----------
 ipcMain.handle('get-config', () => cfg);
 ipcMain.handle('get-defaults', () => config.DEFAULTS);
+ipcMain.handle('list-displays', () => screen.getAllDisplays().map((d, i) => ({ id: String(d.id), label: `Display ${i + 1}: ${d.size.width}×${d.size.height}${d.id === screen.getPrimaryDisplay().id ? ' (primary)' : ''}` })));
 ipcMain.handle('set-config', (_e, patch) => {
   const roleChanged = patch.role && patch.role !== cfg.role;
   cfg = config.mergeTyped(config.DEFAULTS, { ...cfg, ...patch });
   saveCfg(); pushOverlayConfig();
   if (patch.hotkeys) registerHotkeys();
+  if (patch.hud) { createHud(); }
   if (patch.network) startLoop();
   if (roleChanged || patch.tracking) applyCalibration();
   if (roleChanged && state.session.state !== 'idle') { sessionLeave(); toControl('toast', 'Role changed: left the session. Re-join with the new role.'); }
@@ -367,7 +404,8 @@ app.whenReady().then(() => {
   if (loaded.recovered) log('warn', 'config-recovered-defaults', {});
   state.trackingObserve = !!cfg.tracking.observeInput;
   tracker.setCalibration(activeCalibration());
-  createOverlay(); createControl(); createTray(); registerHotkeys(); restartHelper(); startLoop();
+  createOverlay(); createHud(); createControl();
+  screen.on('display-metrics-changed', () => createHud()); screen.on('display-removed', () => createHud()); screen.on('display-added', () => createHud()); createTray(); registerHotkeys(); restartHelper(); startLoop();
   if (loaded.recovered) setTimeout(() => toControl('toast', 'Settings file was unreadable; defaults restored (old file backed up).'), 1500);
   log('info', 'started', { version: app.getVersion() });
   const st = process.env.CREWSIGHT_SELFTEST;
@@ -475,6 +513,8 @@ function runSelfTest(spec) {
   let lastDiag = null, staleSamples = 0, diagSamples = 0;
   const metrics = [];
   ipcMain.on('overlay-diag', (_e, d) => { lastDiag = d; diagSamples++; if (d.stale) staleSamples++; });
+  let hudSamples = 0, hudDrawn = 0, hudLast = null;
+  ipcMain.on('hud-diag', (_e, d) => { hudSamples++; if (d.drawn) hudDrawn++; hudLast = d; });
   // Whole-app CPU (% of one core, summed over processes) and memory, every 10 s.
   const t0 = Date.now();
   setInterval(() => {
@@ -500,7 +540,7 @@ function runSelfTest(spec) {
   }, 500));
   setTimeout(async () => {
     try { fs.writeFileSync(path.join(dir, `overlay-${mode}.png`), (await overlayWin.webContents.capturePage()).toPNG()); } catch {}
-    fs.writeFileSync(outFile, JSON.stringify({ metrics, staleSamples, diagSamples, session: state.session, diag: { ...lastDiag, rttMs: lastDiag && lastDiag.transport === 'p2p' ? lastDiag.p2pRttMs : net.rttMs } }, null, 2));
+    fs.writeFileSync(outFile, JSON.stringify({ hud: { hudSamples, hudDrawn, hudLast }, metrics, staleSamples, diagSamples, session: state.session, diag: { ...lastDiag, rttMs: lastDiag && lastDiag.transport === 'p2p' ? lastDiag.p2pRttMs : net.rttMs } }, null, 2));
     app.isQuitting = true; app.quit();
   }, Number(process.env.CREWSIGHT_SELFTEST_MS || 15000));
 }
