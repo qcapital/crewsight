@@ -39,7 +39,8 @@ const electron = require('electron');
     };
     const pass = checks.sessionConnected && checks.viewpointLive && checks.viewpointRateHz >= 15 &&
       checks.videoState === 'connected' && d.videoSize && d.videoSize[0] > 0 && checks.videoFps > 0 &&
-      r.hud && r.hud.hudDrawn > r.hud.hudSamples / 2 &&
+      r.hud && r.hud.hudDrawn >= 6 && // >= 3 s of drawing; connection setup time varies
+
       (m === 'create' ? (r.marksSeen || []).some((k) => k.mine) : (r.marksSeen || []).some((k) => !k.mine && k.az !== null && (process.env.CREWSIGHT_TRANSPORT !== 'p2p' || k.imgBytes > 1000) && k.hasQ)) &&
       !!(r.hud && r.hud.hudLast && r.hud.hudLast.att && r.hud.hudLast.att.fresh);
     ok = ok && pass;
