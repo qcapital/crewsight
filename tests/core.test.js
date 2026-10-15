@@ -227,3 +227,8 @@ test('protocol: ping marks (direction + snapshot) are validated', () => {
   }
   assert.ok(P.parse(JSON.stringify({ ...vp(), pad: 'x'.repeat(2000) })).error, 'other types keep the small limit');
 });
+
+test('tracking source: centre of screen is a valid live viewpoint at the nose', () => {
+  const { msg } = P.parse(JSON.stringify({ v: 1, t: 'vp', seq: 1, ts: 1, epoch: 'e', az: 0, el: 0, src: 'center', st: 'LIVE_CENTER', cal: false }));
+  assert.ok(msg); const p = project(msg); near(p.x, 0.5); near(p.y, 0.5);
+});

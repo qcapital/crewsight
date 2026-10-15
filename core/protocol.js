@@ -12,8 +12,8 @@ const MAX_SMALL_BYTES = 1024;            // every non-signalling message
 const MAX_SIGNAL_DATA = 15000;
 const SIGNAL_KINDS = ['description', 'candidate'];
 const ROLES = ['pilot', 'gunner'];
-const SOURCES = ['mouse', 'visual', 'manual', 'simulated', 'nose-assumed', 'none'];
-const STATES = ['UNCALIBRATED', 'CALIBRATING', 'LIVE_ESTIMATED', 'LIVE_VISUAL', 'LIVE_MANUAL', 'LIVE_SIMULATED',
+const SOURCES = ['mouse', 'visual', 'center', 'manual', 'simulated', 'nose-assumed', 'none'];
+const STATES = ['UNCALIBRATED', 'CALIBRATING', 'LIVE_ESTIMATED', 'LIVE_VISUAL', 'LIVE_CENTER', 'LIVE_MANUAL', 'LIVE_SIMULATED',
   'NOSE_LOCKED', 'DEGRADED', 'UNAVAILABLE'];
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // 31 symbols, no 0/O/1/I/L
 const CODE_LEN = 12; // ~59 bits of entropy

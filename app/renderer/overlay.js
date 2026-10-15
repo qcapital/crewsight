@@ -347,7 +347,7 @@ function drawDot(now, r) {
   const stale = remote.isStale(now);
   if (!m) { st.textContent = peer.present ? 'NO VIEWPOINT DATA' : '—'; st.className = 'dim'; return; }
   const s = remote.sample(now, { interpolate: cfg.smoothing.interpolate, delayMs: cfg.smoothing.interpDelayMs });
-  const labels = { LIVE_VISUAL: 'LIVE · FROM SCREEN', LIVE_ESTIMATED: 'LIVE · MOUSE ESTIMATE', LIVE_MANUAL: 'LIVE · MANUAL', LIVE_SIMULATED: 'SIMULATED (TEST)',
+  const labels = { LIVE_CENTER: 'CENTRE OF SCREEN', LIVE_VISUAL: 'LIVE · FROM SCREEN', LIVE_ESTIMATED: 'LIVE · MOUSE ESTIMATE', LIVE_MANUAL: 'LIVE · MANUAL', LIVE_SIMULATED: 'SIMULATED (TEST)',
     NOSE_LOCKED: 'PILOT · NOSE / SCREEN CENTRE', DEGRADED: 'DEGRADED · GAME NOT FOCUSED', UNCALIBRATED: 'CREW UNCALIBRATED',
     CALIBRATING: 'CREW CALIBRATING', UNAVAILABLE: 'TRACKING UNAVAILABLE' };
   st.textContent = stale ? 'STALE · NO UPDATES' : labels[s.st] || s.st;

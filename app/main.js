@@ -446,6 +446,7 @@ function localEstimate(now) {
     const t = now / 1000;
     return { az: 70 * Math.sin(t * 0.6), el: 25 * Math.sin(t * 0.9), src: 'simulated', st: 'LIVE_SIMULATED', cal: false };
   }
+  if (mode === 'center') return { az: 0, el: 0, src: 'center', st: 'LIVE_CENTER', cal: false };
   if (mode === 'manual') return { az: state.manual.az, el: state.manual.el, src: 'manual', st: 'LIVE_MANUAL', cal: false };
   if (mode === 'visual' && cfg.role === 'gunner' && !state.cal && !state.limRec) {
     // Gunner tracked from their own screen. Needs the gunner sharing their game window; the pilot's attitude
