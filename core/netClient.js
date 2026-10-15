@@ -77,6 +77,7 @@ class SessionClient extends EventEmitter {
     if (msg.t === 'vp') this.emit('viewpoint', { ...msg, from: m.from });
     else if (msg.t === 'sig') this.emit('signal', { kind: msg.kind, data: msg.data });
     else if (msg.t === 'mark') this.emit('mark', { ...msg, from: m.from });
+    else if (msg.t === 'att') this.emit('att', msg);
     else if (msg.t === 'ping') this._raw({ t: 'pong', id: msg.id, ts: msg.ts });
     else if (msg.t === 'pong') {
       const sent = this.pending.get(msg.id);
@@ -92,6 +93,7 @@ class SessionClient extends EventEmitter {
     }, 1000);
   }
   sendSignal(kind, data) { this._raw({ t: 'sig', kind, data }); }
+  sendAtt(a) { this._raw({ t: 'att', ...a }); }
   sendMark(mark) { this._raw({ t: 'mark', ...mark, img: null }); }
   sendViewpoint(vp) { this._raw({ t: 'vp', ...vp }); }
   leave(silent) {

@@ -138,6 +138,7 @@ class P2PSession extends EventEmitter {
     const { msg } = P.parse(d);
     if (!msg || !this.helloOk) return;
     if (msg.t === 'vp') this.emit('viewpoint', { ...msg, from: this.peerRole });
+    else if (msg.t === 'att') this.emit('att', msg);
     else if (msg.t === 'mark') {
       // At most 3 pings per 2 s from the crew member.
       const now = performance.now(); this._marks = (this._marks || []).filter((t) => now - t < 2000);
@@ -150,6 +151,7 @@ class P2PSession extends EventEmitter {
     }
   }
   sendViewpoint(vp) { if (this.helloOk) this._send({ t: 'vp', ...vp }); }
+  sendAtt(a) { if (this.helloOk) this._send({ t: 'att', ...a }); }
   sendMark(mark) { if (!this.helloOk) return false; this._send({ t: 'mark', ...mark }); return true; }
 
   // ----- video -----

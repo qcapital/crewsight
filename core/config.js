@@ -30,7 +30,9 @@ const DEFAULTS = Object.freeze({
     openSettings: 'Ctrl+Alt+S', recalibrate: 'Ctrl+Alt+R', toggleTracking: 'Ctrl+Alt+T',
     zero: 'Ctrl+Alt+Z', calMark: 'Ctrl+Alt+M', toggleHud: 'Ctrl+Alt+H', ping: 'Ctrl+Shift+Space' },
   // Pings: marker where I aim + snapshot of my screen around the crosshair. zoom = share of my screen width.
-  ping: { showCard: true, zoom: 0.3, cardPos: 'top', cardSeconds: 5, markerSeconds: 6 },
+  ping: { showCard: true, zoom: 0.3, cardPos: 'top', cardSeconds: 5, markerSeconds: 15 },
+  // Track the helicopter's rotation from the pilot's own shared view, so pings stay on their spot in the world.
+  attitude: { enabled: true, staleMs: 1000 },
   calibrations: { pilot: null, gunner: null },
   // Recorded gun viewport limits (degrees, nose-relative). Kept across app versions; export/import as JSON.
   gunLimits: null,

@@ -112,9 +112,9 @@ function createControl() {
   controlWin.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); controlWin.hide(); } });
 }
 function pushOverlayConfig() {
-  toHud('config', { hud: cfg.hud, dot: cfg.dot, smoothing: cfg.smoothing, network: cfg.network, role: cfg.role, ping: cfg.ping });
+  toHud('config', { hud: cfg.hud, dot: cfg.dot, smoothing: cfg.smoothing, network: cfg.network, role: cfg.role, ping: cfg.ping, attitude: cfg.attitude });
   toOverlay('config', { overlay: cfg.overlay, dot: cfg.dot, projection: cfg.projection, smoothing: cfg.smoothing,
-    network: cfg.network, role: cfg.role, share: cfg.share });
+    network: cfg.network, role: cfg.role, share: cfg.share, attitude: cfg.attitude, hud: cfg.hud });
   toOverlay('mode', { clickThrough: state.clickThrough });
 }
 
@@ -364,11 +364,15 @@ function sendPing() {
   lastPingAt = now;
   const est = localEstimate(now);
   const mark = { id: ++pingId, az: est.az === null ? null : Math.round(est.az * 100) / 100, el: est.el === null ? null : Math.round(est.el * 100) / 100 };
-  toOverlay('make-mark', { ...mark, zoom: cfg.ping.zoom });
-  toHud('mark', { ...mark, img: null, mine: true });
+  toOverlay('make-mark', { ...mark, zoom: cfg.ping.zoom, local: true });
 }
 ipcMain.on('mark-out', (_e, mark) => { if (cfg.network.transport === 'relay' && net.state === 'connected') net.sendMark(mark); });
 ipcMain.on('mark-in', (_e, mark) => toHud('mark', mark));
+ipcMain.on('mark-local', (_e, mark) => toHud('mark', { ...mark, mine: true }));
+ipcMain.on('att-local', (_e, a) => toHud('att', { ...a, source: 'own' }));
+ipcMain.on('att-in', (_e, a) => toHud('att', { ...a, source: 'crew' }));
+ipcMain.on('att-out', (_e, a) => { if (cfg.network.transport === 'relay' && net.state === 'connected') net.sendAtt(a); });
+net.on('att', (a) => toOverlay('att-relay-in', a));
 net.on('mark', (mk) => toHud('mark', mk));
 ipcMain.on('ping-now', () => sendPing());
 

@@ -5,6 +5,8 @@
 const { ipcRenderer } = require('electron');
 const { projectIntoView } = require('../../core/projection');
 const { RemoteViewpoint, Smoother } = require('../../core/remoteState');
+const ATT = require('../../core/attitude');
+let att = null; // latest helicopter attitude (own estimate if pilot, received if gunner)
 
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 let cfg = null, local = null;
@@ -15,6 +17,8 @@ ipcRenderer.on('config', (_e, c) => { cfg = c; remote.staleMs = c.network.staleM
 ipcRenderer.on('local', (_e, m) => { local = m; });
 ipcRenderer.on('remote', (_e, m) => remote.accept(m, performance.now()));
 ipcRenderer.on('reset-remote', () => { remote.reset(); smoother.reset(); });
+ipcRenderer.on('att', (_e, a) => { att = { ...a, at: performance.now() }; });
+const attFresh = () => att && att.ok && performance.now() - att.at < ((cfg && cfg.attitude && cfg.attitude.staleMs) || 1000);
 
 // ---------- pings ----------
 let marks = []; let cardTimer = null;
@@ -22,10 +26,10 @@ ipcRenderer.on('mark', (_e, mk) => {
   if (!cfg) return;
   const crew = cfg.role === 'pilot' ? 'GUNNER' : 'PILOT';
   const label = mk.mine ? 'YOU PINGED' : `${crew} PING`;
-  if (mk.az !== null) marks.push({ az: mk.az, el: mk.el, label, mine: !!mk.mine, at: performance.now() });
+  if (mk.az !== null) marks.push({ az: mk.az, el: mk.el, q: mk.q || null, label, mine: !!mk.mine, at: performance.now() });
   marks = marks.slice(-6);
   if (!mk.mine && cfg.ping.showCard) showCard(label, mk.img, mk.az === null);
-  ipcRenderer.send('hud-mark-diag', { mine: !!mk.mine, az: mk.az, el: mk.el, imgBytes: mk.img ? mk.img.length : 0, img: process.env.CREWSIGHT_SELFTEST ? mk.img : undefined });
+  ipcRenderer.send('hud-mark-diag', { mine: !!mk.mine, az: mk.az, el: mk.el, imgBytes: mk.img ? mk.img.length : 0, hasQ: !!mk.q, img: process.env.CREWSIGHT_SELFTEST ? mk.img : undefined });
 });
 function showCard(label, img, noDirection) {
   const card = document.getElementById('card');
@@ -47,7 +51,10 @@ function showCard(label, img, noDirection) {
 function drawMarks(now, W, H, view) {
   marks = marks.filter((k) => now - k.at < (cfg.ping.markerSeconds || 6) * 1000);
   for (const k of marks) {
-    const p = view && projectIntoView({ az: k.az, el: k.el }, view, cfg.hud.fovH, W / H);
+    // World-anchored when the ping carried an attitude and we have a fresh one; otherwise fixed to the airframe.
+    const anchored = k.q && attFresh();
+    const dir = anchored ? ATT.reanchor({ az: k.az, el: k.el }, k.q, att.q) : { az: k.az, el: k.el };
+    const p = view && projectIntoView(dir, view, cfg.hud.fovH, W / H);
     if (!p) continue;
     const age = (now - k.at) / 1000, color = k.mine ? '#4ea1ff' : '#f2cc60';
     const m2 = 34, px = p.inView ? p.x * W : Math.min(W - m2, Math.max(m2, p.x * W)), py = p.inView ? p.y * H : Math.min(H - m2, Math.max(m2, p.y * H));
@@ -63,7 +70,7 @@ function drawMarks(now, W, H, view) {
       ctx.beginPath(); ctx.moveTo(26, 0); ctx.lineTo(14, -8); ctx.lineTo(14, 8); ctx.closePath(); ctx.fill();
       ctx.setTransform(dpr(), 0, 0, dpr(), 0, 0);
     }
-    label(k.label, px + 14, py - 12, color);
+    label(k.label + (k.q ? (anchored ? '' : ' · tracking lost') : ' · not world-locked'), px + 14, py - 12, color);
     ctx.restore();
   }
 }
@@ -77,7 +84,7 @@ function label(text, x, y, color) {
 }
 
 let lastDraw = { drawn: false };
-setInterval(() => ipcRenderer.send('hud-diag', lastDraw), 500);
+setInterval(() => ipcRenderer.send('hud-diag', { ...lastDraw, att: att ? { source: att.source, ok: att.ok, conf: att.conf, fresh: attFresh() } : null }), 500);
 
 function draw() {
   requestAnimationFrame(draw);

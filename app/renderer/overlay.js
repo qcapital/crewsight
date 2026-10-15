@@ -7,6 +7,8 @@ const { project, contentRect, toPixels } = require('../../core/projection');
 const { RemoteViewpoint, Smoother } = require('../../core/remoteState');
 const { P2PSession } = require('./p2p');
 const { estimateShift } = require('../../core/stopDetector');
+const { RotationEstimator } = require('../../core/rotationEstimator');
+const ATT = require('../../core/attitude');
 
 const $ = (id) => document.getElementById(id);
 const video = $('video'), cv = $('cv'), ctx = cv.getContext('2d');
@@ -145,6 +147,7 @@ function ensureP2P() {
   p2p.on('status', (s) => { p2pStatus = s; ipcRenderer.send('p2p-status', s); if (!s.seats || !s.seats[s.role === 'pilot' ? 'gunner' : 'pilot']) remote.reset(); renderLink(); });
   p2p.on('viewpoint', (m) => { remote.accept(m, performance.now()); ipcRenderer.send('remote-vp', m); });
   p2p.on('mark', (mk) => ipcRenderer.send('mark-in', mk));
+  p2p.on('att', (a) => onAttIn(a));
   p2p.on('stream', (s) => { video.srcObject = s; if (s) video.play().catch(() => {}); renderLink(); });
   if (localStream) p2p.setLocalStream(localStream, cfg.share);
   return p2p;
@@ -153,7 +156,7 @@ ipcRenderer.on('p2p-cmd', (_e, c) => {
   const s = ensureP2P();
   if (c.op === 'create') s.create(c.role); else if (c.op === 'join') s.join(c.code, c.role); else s.leave();
 });
-ipcRenderer.on('local', (_e, m) => { if (p2p && isP2P()) p2p.sendViewpoint(m); });
+ipcRenderer.on('local', (_e, m) => { localSt = m.st; if (p2p && isP2P()) p2p.sendViewpoint(m); });
 
 // ---------------- own-image motion (gun-limit recording) ----------------
 // Downscaled grayscale frames of MY shared game window; the global shift between frames tells main whether
@@ -194,9 +197,55 @@ function snapshotAroundCentre(zoom) {
   for (const q of [0.8, 0.6, 0.4]) { const url = snapCv.toDataURL('image/jpeg', q); if (url.length < 280000) return url; }
   return null;
 }
+// ---------------- helicopter attitude ----------------
+// Pilot: estimate rotation from MY OWN game capture (camera fixed to the nose). Paused while free-looking,
+// because then the image also moves with the camera. Gunner: use the attitude received from the pilot.
+let att = { q: ATT.IDENTITY, conf: 0, ok: false, at: 0, seq: 0, source: 'none' };
+let rotEst = null, rotTimer = null, localSt = null;
+const RW = 160, RH = 90;
+const rcv = document.createElement('canvas'); rcv.width = RW; rcv.height = RH;
+const rctx = rcv.getContext('2d', { willReadFrequently: true });
+const attVideo = document.createElement('video'); attVideo.muted = true;
+function attitudeWanted() { return cfg && cfg.attitude.enabled && cfg.role === 'pilot' && localStream; }
+function updateAttitudeLoop() {
+  if (!attitudeWanted()) { clearInterval(rotTimer); rotTimer = null; rotEst = null; return; }
+  if (rotTimer) return;
+  attVideo.srcObject = localStream; attVideo.play().catch(() => {});
+  rotEst = new RotationEstimator({ w: RW, h: RH, fovH: cfg.hud.fovH });
+  att = { q: ATT.IDENTITY, conf: 0, ok: false, at: performance.now(), seq: 0, source: 'own' };
+  let confAvg = 0;
+  rotTimer = setInterval(() => {
+    if (attVideo.readyState < 2) return;
+    rctx.drawImage(attVideo, 0, 0, RW, RH);
+    const d = rctx.getImageData(0, 0, RW, RH).data, g = new Uint8Array(RW * RH);
+    for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8;
+    rotEst.setFov(cfg.hud.fovH);
+    const freelook = localSt === 'LIVE_ESTIMATED'; // pilot camera off the nose
+    if (freelook) { rotEst.reset(); att.ok = false; att.at = performance.now(); return; }
+    const r = rotEst.push(g);
+    if (!r) return;
+    confAvg = confAvg * 0.8 + r.conf * 0.2;
+    if (r.conf > 0.3) att.q = ATT.integrate(att.q, r.yaw, r.pitch, r.roll);
+    att.conf = +confAvg.toFixed(2); att.ok = confAvg > 0.35; att.at = performance.now();
+  }, 33);
+}
+let attErr = null;
+setInterval(() => {
+  try { updateAttitudeLoop(); } catch (e) { attErr = String(e && e.stack || e).slice(0, 300); }
+  if (!rotTimer) return;
+  const msg = { seq: ++att.seq, q: att.q.map((v) => +v.toFixed(6)), conf: att.conf, ok: att.ok };
+  msg.q = ATT.qnorm(msg.q);
+  ipcRenderer.send('att-local', msg);
+  if (isP2P()) { if (p2p) p2p.sendAtt(msg); } else ipcRenderer.send('att-out', msg);
+}, 66);
+function onAttIn(a) { att = { q: a.q, conf: a.conf, ok: a.ok, at: performance.now(), seq: a.seq, source: 'crew' }; ipcRenderer.send('att-in', a); }
+ipcRenderer.on('att-relay-in', (_e, a) => onAttIn(a));
+
 ipcRenderer.on('make-mark', (_e, mk) => {
   const img = snapshotAroundCentre(mk.zoom);
-  const mark = { id: mk.id, az: mk.az, el: mk.el, img };
+  const fresh = att.ok && performance.now() - att.at < (cfg.attitude.staleMs || 1000);
+  const mark = { id: mk.id, az: mk.az, el: mk.el, img, q: fresh ? ATT.qnorm(att.q.map((v) => +v.toFixed(6))) : null };
+  if (mk.local) ipcRenderer.send('mark-local', { ...mark, img: null });
   if (isP2P()) { if (p2p) p2p.sendMark(mark); } else ipcRenderer.send('mark-out', mark);
 });
 // Keep the snapshot video warm while sharing, so the first ping has a frame.
@@ -332,5 +381,6 @@ setInterval(() => {
     remote: remote.latest ? { az: remote.latest.az, el: remote.latest.el, st: remote.latest.st, src: remote.latest.src, cal: remote.latest.cal } : null,
     remoteRateHz: remote.updateRateHz(now), stale: remote.isStale(now), stats: remote.stats,
     sinceLastMs: remote.receivedAt === null ? null : Math.round(now - remote.receivedAt), shareStatus,
+    attDiag: { err: attErr, running: !!rotTimer, wanted: !!attitudeWanted(), source: att.source, ok: att.ok, conf: att.conf, seq: att.seq, role: cfg && cfg.role, hasAttCfg: !!(cfg && cfg.attitude) },
   });
 }, 500);

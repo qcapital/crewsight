@@ -61,6 +61,12 @@ const validators = {
   sig: (m) => SIGNAL_KINDS.includes(m.kind) && typeof m.data === 'string' && m.data.length <= MAX_SIGNAL_DATA
     ? { t: 'sig', kind: m.kind, data: m.data } : null,
   ping: (m) => isUInt(m.id) && isFiniteNum(m.ts) ? { t: 'ping', id: m.id, ts: m.ts } : null,
+  // Helicopter attitude change estimated from the pilot's view (unit quaternion, arbitrary world frame).
+  att: (m) => {
+    if (!isUInt(m.seq) || !Array.isArray(m.q) || m.q.length !== 4 || !m.q.every(isFiniteNum)) return null;
+    if (Math.abs(Math.hypot(...m.q) - 1) > 1e-3 || !isFiniteNum(m.conf) || m.conf < 0 || m.conf > 1 || typeof m.ok !== 'boolean') return null;
+    return { t: 'att', seq: m.seq, q: m.q, conf: m.conf, ok: m.ok };
+  },
   // Crew ping: my aim direction (nose-relative, null if unknown) + optional JPEG snapshot around my crosshair.
   mark: (m) => {
     if (!isUInt(m.id)) return null;
@@ -74,11 +80,16 @@ const validators = {
       if (typeof m.img !== 'string' || m.img.length > MAX_PING_IMG || !IMG_RE.test(m.img)) return null;
       img = m.img;
     }
-    return { t: 'mark', id: m.id, az, el, img };
+    let q = null;
+    if (m.q !== null && m.q !== undefined) {
+      if (!Array.isArray(m.q) || m.q.length !== 4 || !m.q.every(isFiniteNum) || Math.abs(Math.hypot(...m.q) - 1) > 1e-3) return null;
+      q = m.q;
+    }
+    return { t: 'mark', id: m.id, az, el, img, q };
   },
   pong: (m) => isUInt(m.id) && isFiniteNum(m.ts) ? { t: 'pong', id: m.id, ts: m.ts } : null,
 };
-const PEER_TYPES = new Set(['vp', 'sig', 'ping', 'pong', 'mark']);
+const PEER_TYPES = new Set(['vp', 'sig', 'ping', 'pong', 'mark', 'att']);
 
 /** Parse+validate a raw frame. Returns { msg } or { error }. */
 function parse(raw) {

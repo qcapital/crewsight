@@ -103,6 +103,46 @@ Records exactly where the gun can point, so the gunner's tracked aim stops at th
 
 **Storage:** the limits are saved in degrees in `%APPDATA%\CrewSight\config.json`. They survive app updates and don't depend on mouse sensitivity. Use **Export…** to save them to a file, and **Import…** to load them on another PC or after a reinstall.
 
+## World-locked pings (new in 0.4.0)
+Pings now stay on their spot in the world while the helicopter turns, pitches and rolls.
+
+**How it works:** the pilot's camera is fixed to the nose, so when the pilot's whole picture shifts or rotates, the helicopter is turning. The pilot's app measures that from its own game capture, about 30 times a second:
+- It matches patches between frames and fits the exact rotation of a pinhole camera.
+- It ignores patches that disagree, such as the static cockpit, other vehicles and smoke.
+- It sends the resulting helicopter attitude to the gunner about 15 times a second.
+
+Every ping carries the attitude at the moment it was made. Both HUDs keep re-placing the marker as the helicopter rotates.
+
+**Requirements:**
+- The pilot must be sharing their game window.
+- **Game horizontal FOV** must be set correctly on the pilot's PC. It sets the scale of the measured rotation.
+- Tracking pauses while the pilot holds free-look, because the camera then moves independently of the airframe.
+
+**Accuracy:** tested on synthetic 3D scenes with known motion:
+- Yaw, pitch and roll are recovered to within about 3–7%.
+- Mixed manoeuvres stay within 10% over 3 s.
+- A hovering helicopter doesn't drift.
+- A static cockpit covering the lower third of the view is ignored.
+
+In-game accuracy hasn't been measured yet.
+
+**Marker labels:**
+- **· not world-locked:** the ping had no attitude, because the pilot wasn't sharing.
+- **· tracking lost:** the attitude stream is stale or low-confidence. The marker falls back to the airframe direction.
+
+**Not handled: helicopter translation.** Only rotation is tracked. If the helicopter flies sideways or past a target, the marker drifts by the change in viewing angle. For example, flying 50 m past a target 500 m away moves it by up to about 6°; nearby targets drift more.
+
+**Why not a full 3D ground map:** mapping the terrain from the gunner's view (monocular SLAM) was considered and not built:
+- The gunner's camera moves on its own, so its view isn't tied to the airframe.
+- A single camera can't measure distance or scale.
+- Smoke, explosions and moving vehicles break feature tracking.
+
+Rotation, which causes most of the error, is solved this way. Translation would need a much larger, less reliable system.
+
+**Other limitations:**
+- Roll is the weakest axis when a large cockpit frame fills the view.
+- Starting or stopping the pilot's share restarts the attitude, so pings made before that lose their lock.
+
 ## Known limitations
 - **Gunner calibration:** the pilot's HUD works with no setup. The gunner must calibrate mouse tracking; otherwise the gunner's own aim is unknown, so the gunner's HUD cannot place the pilot's dot, and the pilot's HUD cannot place the gunner's.
 - **HUD accuracy:** the HUD assumes the game's horizontal FOV is set correctly and ignores the few metres between the two seats. Very close targets will be slightly off.
