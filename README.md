@@ -143,6 +143,32 @@ Rotation, which causes most of the error, is solved this way. Translation would 
 - Roll is the weakest axis when a large cockpit frame fills the view.
 - Starting or stopping the pilot's share restarts the attitude, so pings made before that lose their lock.
 
+## Screen-based gunner tracking (new in 0.5.0, now the default)
+The gunner's dot is now measured from the **gunner's own screen** instead of being added up from mouse movement:
+- The gunner's app measures how their picture rotates, which is exactly what the gun optic did, turret speed limit and stops included.
+- It subtracts the helicopter's own rotation (streamed from the pilot), which leaves the gun direction relative to the nose.
+
+This fixes the dot running ahead of the optic during fast flicks and drifting after hitting a limit.
+
+**Requirements:** both players share their game windows. The gunner's turret needs the gunner's own picture, and the helicopter rotation needs the pilot's.
+
+**Plain sky:** when the picture has too little detail, the mouse fills in briefly. Its degrees-per-count scale is learned automatically from the screen, so a rough calibration doesn't matter. Calibration only provides a starting value.
+
+**Recorded gun limits** still clamp the result.
+
+**Re-zero:** press `Ctrl+Alt+Z` while aiming at the nose, after spawning or whenever the dot looks offset. The screen-based estimate slowly accumulates small errors over long sessions, as all such tracking does.
+
+**Labels the pilot sees:**
+- **LIVE · FROM SCREEN:** normal screen-based tracking.
+- **LIVE · MOUSE ESTIMATE:** a brief mouse fill-in over plain sky.
+- **DEGRADED:** the pilot isn't sharing, so helicopter turns can't be removed.
+
+**Accuracy:** tested on simulated 3D scenes with the helicopter manoeuvring, the turret capped at 60°/s and hitting its stop, and a calibration 30% off:
+- The screen-based estimate stayed within 6° of the true gun direction.
+- Mouse-only tracking was off by more than 30° in the same test.
+
+In-game accuracy hasn't been measured yet.
+
 ## Known limitations
 - **Gunner calibration:** the pilot's HUD works with no setup. The gunner must calibrate mouse tracking; otherwise the gunner's own aim is unknown, so the gunner's HUD cannot place the pilot's dot, and the pilot's HUD cannot place the gunner's.
 - **HUD accuracy:** the HUD assumes the game's horizontal FOV is set correctly and ignores the few metres between the two seats. Very close targets will be slightly off.

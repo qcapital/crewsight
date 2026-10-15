@@ -25,7 +25,8 @@ const DEFAULTS = Object.freeze({
     transport: 'p2p', broker: null, // broker: {host, port, path, secure} for a self-hosted peerjs-server
     // STUN finds a direct path; add a TURN server (user-supplied credentials) for strict NATs.
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
-  tracking: { mode: 'mouse', observeInput: false, foregroundFilter: 'WarDogs', limitStopDetection: true },
+  // mode 'visual' = gunner tracked from their own shared screen + pilot's helicopter attitude (mouse fills gaps).
+  tracking: { visualDefaultApplied: false, mode: 'visual', observeInput: false, foregroundFilter: 'WarDogs', limitStopDetection: true },
   hotkeys: { toggleOverlay: 'Ctrl+Alt+O', toggleClickThrough: 'Ctrl+Alt+C',
     openSettings: 'Ctrl+Alt+S', recalibrate: 'Ctrl+Alt+R', toggleTracking: 'Ctrl+Alt+T',
     zero: 'Ctrl+Alt+Z', calMark: 'Ctrl+Alt+M', toggleHud: 'Ctrl+Alt+H', ping: 'Ctrl+Shift+Space' },

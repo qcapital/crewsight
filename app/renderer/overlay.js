@@ -213,7 +213,10 @@ const RW = 160, RH = 90;
 const rcv = document.createElement('canvas'); rcv.width = RW; rcv.height = RH;
 const rctx = rcv.getContext('2d', { willReadFrequently: true });
 const attVideo = document.createElement('video'); attVideo.muted = true;
-function attitudeWanted() { return cfg && cfg.attitude.enabled && cfg.role === 'pilot' && localStream; }
+function attitudeWanted() {
+  if (!cfg || !localStream) return false;
+  return (cfg.role === 'pilot' && cfg.attitude.enabled) || (cfg.role === 'gunner' && cfg.tracking && cfg.tracking.mode === 'visual');
+}
 function updateAttitudeLoop() {
   if (!attitudeWanted()) { clearInterval(rotTimer); rotTimer = null; rotEst = null; return; }
   if (rotTimer) return;
@@ -227,6 +230,8 @@ function updateAttitudeLoop() {
     const d = rctx.getImageData(0, 0, RW, RH).data, g = new Uint8Array(RW * RH);
     for (let i = 0; i < g.length; i++) g[i] = (d[i * 4] * 77 + d[i * 4 + 1] * 150 + d[i * 4 + 2] * 29) >> 8;
     rotEst.setFov(cfg.hud.fovH);
+    const r0 = cfg.role === 'gunner' ? rotEst.push(g) : null;
+    if (cfg.role === 'gunner') { ipcRenderer.send('cam-inc', r0 ? { yaw: r0.yaw, pitch: r0.pitch, roll: r0.roll, conf: r0.conf } : null); return; }
     const freelook = localSt === 'LIVE_ESTIMATED'; // pilot camera off the nose
     if (freelook) { rotEst.reset(); att.ok = false; att.at = performance.now(); return; }
     const r = rotEst.push(g);
@@ -239,7 +244,7 @@ function updateAttitudeLoop() {
 let attErr = null;
 setInterval(() => {
   try { updateAttitudeLoop(); } catch (e) { attErr = String(e && e.stack || e).slice(0, 300); }
-  if (!rotTimer) return;
+  if (!rotTimer || cfg.role !== 'pilot') return;
   const msg = { seq: ++att.seq, q: att.q.map((v) => +v.toFixed(6)), conf: att.conf, ok: att.ok };
   msg.q = ATT.qnorm(msg.q);
   ipcRenderer.send('att-local', msg);
@@ -342,7 +347,7 @@ function drawDot(now, r) {
   const stale = remote.isStale(now);
   if (!m) { st.textContent = peer.present ? 'NO VIEWPOINT DATA' : '—'; st.className = 'dim'; return; }
   const s = remote.sample(now, { interpolate: cfg.smoothing.interpolate, delayMs: cfg.smoothing.interpDelayMs });
-  const labels = { LIVE_ESTIMATED: 'LIVE · MOUSE ESTIMATE', LIVE_MANUAL: 'LIVE · MANUAL', LIVE_SIMULATED: 'SIMULATED (TEST)',
+  const labels = { LIVE_VISUAL: 'LIVE · FROM SCREEN', LIVE_ESTIMATED: 'LIVE · MOUSE ESTIMATE', LIVE_MANUAL: 'LIVE · MANUAL', LIVE_SIMULATED: 'SIMULATED (TEST)',
     NOSE_LOCKED: 'PILOT · NOSE / SCREEN CENTRE', DEGRADED: 'DEGRADED · GAME NOT FOCUSED', UNCALIBRATED: 'CREW UNCALIBRATED',
     CALIBRATING: 'CREW CALIBRATING', UNAVAILABLE: 'TRACKING UNAVAILABLE' };
   st.textContent = stale ? 'STALE · NO UPDATES' : labels[s.st] || s.st;

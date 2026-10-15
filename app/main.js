@@ -11,6 +11,7 @@ const { MouseTracker, emptyCalibration, solveAxis, combineAxes } = require('../c
 const { SessionClient } = require('../core/netClient');
 const { buildEnvelope, validateEnvelope, LIMITS_VERSION } = require('../core/gunLimits');
 const { StopDetector } = require('../core/stopDetector');
+const { GunnerFusion } = require('../core/gunnerFusion');
 
 // Allows a second instance on one PC for testing: CREWSIGHT_PROFILE=b npm start
 if (process.env.CREWSIGHT_PROFILE) app.setPath('userData', app.getPath('userData') + '-' + process.env.CREWSIGHT_PROFILE);
@@ -26,6 +27,8 @@ const state = {
   manual: { az: 0, el: 0 }, seq: 0, epoch: newEpoch(), cal: null, capture: { status: 'none' },
 };
 const tracker = new MouseTracker(emptyCalibration('gunner'));
+let fusion = new GunnerFusion({});
+const fusionIn = { mouse: { dx: 0, dy: 0 }, lastCam: 0, lastVisual: 0, lastHeli: 0 };
 const net = new SessionClient();
 
 function newEpoch() { return crypto.randomBytes(6).toString('hex'); }
@@ -44,9 +47,16 @@ function activeCalibration() {
   const c = cfg.calibrations[cfg.role];
   return c && c.role === cfg.role ? c : emptyCalibration(cfg.role);
 }
+function resetFusion() {
+  const c = cfg.calibrations.gunner;
+  const ok = c && c.valid && !c.noseOnly && c.degPerCountX;
+  fusion = new GunnerFusion({ degPerCountX: ok ? c.degPerCountX : null, degPerCountY: ok ? c.degPerCountY : null,
+    signX: ok ? c.signX : 1, signY: ok ? c.signY : -1, limits: cfg.gunLimits });
+}
 function applyCalibration() {
   tracker.setCalibration(activeCalibration());
   tracker.setLimits(cfg.gunLimits);
+  resetFusion();
   state.epoch = newEpoch(); state.seq = 0; // receivers restart their sequence space
   restartHelper();
 }
@@ -114,7 +124,7 @@ function createControl() {
 function pushOverlayConfig() {
   toHud('config', { hud: cfg.hud, dot: cfg.dot, smoothing: cfg.smoothing, network: cfg.network, role: cfg.role, ping: cfg.ping, attitude: cfg.attitude });
   toOverlay('config', { overlay: cfg.overlay, dot: cfg.dot, projection: cfg.projection, smoothing: cfg.smoothing,
-    network: cfg.network, role: cfg.role, share: cfg.share, attitude: cfg.attitude, hud: cfg.hud });
+    network: cfg.network, role: cfg.role, share: cfg.share, attitude: cfg.attitude, hud: cfg.hud, tracking: cfg.tracking });
   toOverlay('mode', { clickThrough: state.clickThrough });
 }
 
@@ -146,7 +156,7 @@ function registerHotkeys() {
     openSettings: () => createControl(),
     recalibrate: () => { createControl(); toControl('goto', 'tracking'); },
     toggleTracking: () => setObserve(!state.trackingObserve),
-    zero: () => { tracker.zero(performance.now()); toControl('toast', 'Tracking re-zeroed to the nose'); },
+    zero: () => { tracker.zero(performance.now()); fusion.zero(); toControl('toast', 'Tracking re-zeroed to the nose'); },
     calMark: () => (state.limRec ? limMark() : calMark()),
     toggleHud: () => setHudEnabled(!cfg.hud.enabled),
     ping: () => sendPing(),
@@ -191,7 +201,7 @@ function stopHelper() {
 }
 function restartHelper() {
   stopHelper();
-  const needed = state.trackingObserve && (cfg.tracking.mode === 'mouse' || state.cal);
+  const needed = state.trackingObserve && (cfg.tracking.mode === 'mouse' || cfg.tracking.mode === 'visual' || state.cal || state.limRec);
   if (!needed) { pushStatus(); return; }
   const exe = helperPath();
   if (!fs.existsSync(exe)) { state.helperStatus = 'missing'; log('error', 'helper-missing', { exe }); pushStatus(); return; }
@@ -223,6 +233,7 @@ function onHelperLine(line) {
     if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
     if (state.cal) { state.cal.cx += dx; state.cal.cy += dy; state.cal.moved += Math.abs(dx) + Math.abs(dy); }
     try { tracker.addDelta(dx, dy); } catch (e) { log('error', 'tracker-delta', { e: String(e.message) }); }
+    if (!tracker.focusOk && cfg.tracking.foregroundFilter) { /* mouse outside the game: don't feed the gun estimate */ } else { fusionIn.mouse.dx += dx; fusionIn.mouse.dy += dy; }
     if (state.limRec) limOnDelta(dx, dy);
   } else if (k === 'K') tracker.setFreelook(a === '1');
   else if (k === 'F') { tracker.focusOk = cfg.tracking.foregroundFilter ? a === '1' : true; pushStatus(); }
@@ -357,7 +368,7 @@ function limFinish() {
     perDirection: Object.fromEntries(['right', 'left', 'up', 'down'].map((k) => [k, { counts: r.moved[k], ignoredPct: r.moved[k] ? Math.round((100 * r.blocked[k]) / r.moved[k]) : 0 }])),
     imageMotionKnownPct: r.knownFrames + r.unknownFrames ? Math.round((100 * r.knownFrames) / (r.knownFrames + r.unknownFrames)) : 0,
     calibrationCreatedAt: r.cal.createdAt, appVersion: app.getVersion(), trace: r.points.filter((_, i) => i % 3 === 0).map(({ az, el }) => ({ az, el })) };
-  if (v.valid) { cfg.gunLimits = result; saveCfg(); tracker.setLimits(cfg.gunLimits); }
+  if (v.valid) { cfg.gunLimits = result; saveCfg(); tracker.setLimits(cfg.gunLimits); fusion.setLimits(cfg.gunLimits); }
   log('info', 'gun-limits-recorded', { valid: v.valid, method, residual: result.returnResidualDeg });
   toControl('limrec-result', result); pushLim(); pushStatus();
 }
@@ -415,7 +426,14 @@ ipcMain.on('mark-out', (_e, mark) => { if (cfg.network.transport === 'relay' && 
 ipcMain.on('mark-in', (_e, mark) => toHud('mark', mark));
 ipcMain.on('mark-local', (_e, mark) => toHud('mark', { ...mark, mine: true }));
 ipcMain.on('att-local', (_e, a) => toHud('att', { ...a, source: 'own' }));
-ipcMain.on('att-in', (_e, a) => toHud('att', { ...a, source: 'crew' }));
+ipcMain.on('att-in', (_e, a) => { toHud('att', { ...a, source: 'crew' }); fusion.setHeli(a.q, a.ok); fusionIn.lastHeli = performance.now(); });
+ipcMain.on('cam-inc', (_e, inc) => {
+  const now = performance.now();
+  fusionIn.lastCam = now;
+  if (inc && inc.conf >= 0.4) fusionIn.lastVisual = now;
+  fusion.step(inc, fusionIn.mouse);
+  fusionIn.mouse = { dx: 0, dy: 0 };
+});
 ipcMain.on('att-out', (_e, a) => { if (cfg.network.transport === 'relay' && net.state === 'connected') net.sendAtt(a); });
 net.on('att', (a) => toOverlay('att-relay-in', a));
 net.on('mark', (mk) => toHud('mark', mk));
@@ -429,6 +447,18 @@ function localEstimate(now) {
     return { az: 70 * Math.sin(t * 0.6), el: 25 * Math.sin(t * 0.9), src: 'simulated', st: 'LIVE_SIMULATED', cal: false };
   }
   if (mode === 'manual') return { az: state.manual.az, el: state.manual.el, src: 'manual', st: 'LIVE_MANUAL', cal: false };
+  if (mode === 'visual' && cfg.role === 'gunner' && !state.cal && !state.limRec) {
+    // Gunner tracked from their own screen. Needs the gunner sharing their game window; the pilot's attitude
+    // removes the helicopter's own rotation (without it, manoeuvres leak into the turret estimate).
+    if (now - fusionIn.lastCam > 600) return { az: null, el: null, src: 'none', st: 'UNAVAILABLE', cal: false, why: 'share your game window' };
+    const e = fusion.estimate();
+    const visualRecent = now - fusionIn.lastVisual < 400;
+    const heliFresh = now - fusionIn.lastHeli < 1000 && e.heliOk;
+    if (!visualRecent && !e.learnedScaleX) return { az: null, el: null, src: 'none', st: 'DEGRADED', cal: false, why: 'picture has too little detail' };
+    return { az: e.az, el: e.el, src: e.source === 'mouse' ? 'mouse' : 'visual',
+      st: heliFresh && (visualRecent || e.source === 'mouse') ? (e.source === 'mouse' ? 'LIVE_ESTIMATED' : 'LIVE_VISUAL') : 'DEGRADED', cal: true,
+      why: heliFresh ? null : 'pilot attitude missing (pilot must share their game window)' };
+  }
   if (!state.trackingObserve && !activeCalibration().noseOnly) {
     const c = activeCalibration();
     return { az: null, el: null, src: 'none', st: c.valid ? 'UNAVAILABLE' : 'UNCALIBRATED', cal: c.valid };
@@ -445,10 +475,11 @@ function startLoop() {
   loopTimer = setInterval(() => {
     const now = performance.now();
     const est = localEstimate(now);
-    const msg = { seq: state.seq++, ts: Math.round(now), epoch: state.epoch, ...est };
+    const { why, ...wire } = est;
+    const msg = { seq: state.seq++, ts: Math.round(now), epoch: state.epoch, ...wire };
     if (msg.az !== null) { msg.az = Math.round(msg.az * 100) / 100; msg.el = Math.round(msg.el * 100) / 100; }
     if (net.state === 'connected') net.sendViewpoint(msg);
-    toControl('local', { ...msg, freelook: tracker.freelookHeld, focusOk: tracker.focusOk });
+    toControl('local', { ...msg, why, freelook: tracker.freelookHeld, focusOk: tracker.focusOk, learnedScale: fusion.scaleX });
     toOverlay('local', msg);
     toHud('local', msg);
   }, 1000 / hz);
@@ -547,7 +578,7 @@ ipcMain.on('set-manual', (_e, m) => { if (Number.isFinite(m.az) && Number.isFini
 ipcMain.on('set-overlay-visible', (_e, v) => setOverlayVisible(!!v));
 ipcMain.on('set-click-through', (_e, v) => setClickThrough(!!v));
 ipcMain.on('set-observe', (_e, v) => setObserve(!!v));
-ipcMain.on('zero', () => tracker.zero(performance.now()));
+ipcMain.on('zero', () => { tracker.zero(performance.now()); fusion.zero(); });
 ipcMain.on('cal-start', (_e, o) => calStart(o || {}));
 ipcMain.on('cal-mark', () => calMark());
 ipcMain.on('cal-cancel', () => { state.cal = null; pushCal(); });
@@ -561,8 +592,9 @@ app.whenReady().then(() => {
   const loaded = config.load(CONFIG_FILE());
   cfg = loaded.config;
   if (loaded.recovered) log('warn', 'config-recovered-defaults', {});
+  if (!cfg.tracking.visualDefaultApplied) { cfg.tracking.visualDefaultApplied = true; if (cfg.tracking.mode === 'mouse') cfg.tracking.mode = 'visual'; saveCfg(); }
   state.trackingObserve = !!cfg.tracking.observeInput;
-  tracker.setCalibration(activeCalibration()); tracker.setLimits(cfg.gunLimits);
+  tracker.setCalibration(activeCalibration()); tracker.setLimits(cfg.gunLimits); resetFusion();
   createOverlay(); createHud(); createControl();
   screen.on('display-metrics-changed', () => createHud()); screen.on('display-removed', () => createHud()); screen.on('display-added', () => createHud()); createTray(); registerHotkeys(); restartHelper(); startLoop();
   if (loaded.recovered) setTimeout(() => toControl('toast', 'Settings file was unreadable; defaults restored (old file backed up).'), 1500);
@@ -707,7 +739,7 @@ async function runLimitsTest(dir) {
 // Automated two-instance check (used by scripts/selftest.js): CREWSIGHT_SELFTEST=create|join,<dir>,<relayUrl>
 function runSelfTest(spec) {
   const [mode, dir, url] = spec.split(',');
-  cfg.tracking.mode = 'simulated';
+  cfg.tracking.mode = mode === 'join' && process.env.CREWSIGHT_GUNNER_MODE ? process.env.CREWSIGHT_GUNNER_MODE : 'simulated';
   const codeFile = path.join(dir, 'code.txt');
   const outFile = path.join(dir, `result-${mode}.json`);
   let lastDiag = null, staleSamples = 0, diagSamples = 0;

@@ -250,7 +250,7 @@ ipcRenderer.on('status', (_e, s) => {
 });
 ipcRenderer.on('local', (_e, m) => {
   local = m;
-  $('trackState').textContent = `My state: ${m.st}` + (m.az !== null ? ` · az ${m.az.toFixed(1)}° el ${m.el.toFixed(1)}°` : '') +
+  $('trackState').textContent = `My state: ${m.st}` + (m.why ? ` (${m.why})` : '') + (m.az !== null ? ` · az ${m.az.toFixed(1)}° el ${m.el.toFixed(1)}°` : '') + (m.src === 'visual' || m.learnedScale ? ` · source ${m.src}${m.learnedScale ? `, learned ${m.learnedScale.toFixed(4)}°/count` : ''}` : '') +
     (cfg && cfg.role === 'pilot' && m.src !== 'manual' ? ` · free-look ${m.freelook ? 'held' : 'released'}` : '');
 });
 ipcRenderer.on('diag', (_e, d) => { diag = d; });
