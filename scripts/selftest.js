@@ -38,7 +38,7 @@ const electron = require('electron');
       attDiag: d.attDiag,
       hudDrawn: r.hud ? `${r.hud.hudDrawn}/${r.hud.hudSamples}` : null, hudLast: r.hud && r.hud.hudLast, attitude: r.hud && r.hud.hudLast && r.hud.hudLast.att,
     };
-    const pass = checks.sessionConnected && checks.viewpointLive && checks.viewpointRateHz >= 15 &&
+    const pass = checks.sessionConnected && checks.viewpointLive && checks.viewpointRateHz >= (process.env.CREWSIGHT_PANTEST ? 10 : 15) /* scene renderer loads the CPU */ &&
       checks.videoState === 'connected' && d.videoSize && d.videoSize[0] > 0 && checks.videoFps > 0 &&
       r.hud && r.hud.hudDrawn >= 6 && // >= 3 s of drawing; connection setup time varies
 

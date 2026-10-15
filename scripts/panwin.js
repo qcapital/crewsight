@@ -10,5 +10,8 @@ app.whenReady().then(() => {
   const other = screen.getAllDisplays().find((d) => d.id !== screen.getPrimaryDisplay().id) || screen.getPrimaryDisplay();
   const w = new BrowserWindow({ width: 640, height: 360, x: other.workArea.x + 60, y: other.workArea.y + 60, frame: false, useContentSize: true, title: 'PanTest', webPreferences: { backgroundThrottling: false } });
   w.loadFile(path.join(__dirname, 'pantest.html'), { query: { rate: process.env.PAN_RATE || '15' } });
+  // A still scene for the pilot instance, so its helicopter-rotation estimate isn't disturbed by desktop activity.
+  const still = new BrowserWindow({ width: 640, height: 360, x: other.workArea.x + 60, y: other.workArea.y + 460, frame: false, useContentSize: true, title: 'StillTest', webPreferences: { backgroundThrottling: false } });
+  still.loadFile(path.join(__dirname, 'pantest.html'), { query: { rate: '0', title: 'StillTest' } });
   setTimeout(() => app.quit(), Number(process.env.PAN_MS || 30000));
 });

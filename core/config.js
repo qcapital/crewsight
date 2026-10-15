@@ -17,7 +17,8 @@ const DEFAULTS = Object.freeze({
   share: { lastSourceName: null, autoReattach: true, maxWidth: 1280, maxFps: 30, maxBitrateKbps: 2500 },
   // Crew member's dot drawn on MY game screen. fovH must match the game's horizontal field of view.
   hud: { enabled: true, displayId: null, fovH: 90, showLabel: true },
-  dot: { color: '#ff3b30', size: 14, opacity: 0.95, halo: true, hideWhenStale: false },
+  // crewVideo: 'centre' = crew member's dot at the centre of THEIR video (their crosshair); 'projected' = angle-mapped.
+  dot: { color: '#ff3b30', size: 14, opacity: 0.95, halo: true, hideWhenStale: false, crewVideo: 'centre' },
   projection: { mode: 'linear', azMax: 90, elMax: 45, centerX: 0.5, centerY: 0.5 },
   smoothing: { interpolate: true, interpDelayMs: 40, visualTauMs: 30 },
   network: { sendHz: 30, staleMs: 750,

@@ -137,6 +137,7 @@ async function attachLocalTrack() {
   } catch (e) { /* parameters can only be set after negotiation; retried on next attach */ }
 }
 setInterval(() => { if (pc && pc.connectionState === 'connected') attachLocalTrack(); }, 5000);
+setInterval(() => renderLink(), 1000); // keep the video status badge current
 
 // ---------------- P2P transport (default) ----------------
 let p2p = null, p2pStatus = null;
@@ -290,7 +291,8 @@ function renderLink() {
   if (peer.inSession && !peer.present) { t = 'WAITING FOR CREW'; c = 'warn'; }
   else if (isP2P() && peer.inSession) {
     const s = p2p ? p2p.videoState() : 'none';
-    t = s === 'connected' ? 'VIDEO LINKED' : s === 'none' ? (video.srcObject ? 'VIDEO LINKED' : 'CREW CONNECTED · NO VIDEO') : 'VIDEO ' + s.toUpperCase();
+    const frames = video.srcObject && performance.now() - stats.lastPeerFrameAt < 2000; // PeerJS doesn't always update the state
+    t = s === 'connected' || frames ? 'VIDEO LINKED' : s === 'none' ? 'CREW CONNECTED · NO VIDEO' : 'VIDEO ' + s.toUpperCase();
     c = s === 'failed' ? 'bad' : 'ok';
   } else if (peer.inSession && pc) {
     const s = pc.connectionState;
@@ -352,10 +354,19 @@ function drawDot(now, r) {
     CALIBRATING: 'CREW CALIBRATING', UNAVAILABLE: 'TRACKING UNAVAILABLE' };
   st.textContent = stale ? 'STALE · NO UPDATES' : labels[s.st] || s.st;
   st.className = stale ? 'bad' : s.st.startsWith('LIVE') && s.st !== 'LIVE_SIMULATED' ? 'ok' : 'warn';
-  if (s.az === null) { smoother.reset(); return; }
   if (stale && cfg.dot.hideWhenStale) return;
-  const p = project({ az: s.az, el: s.el }, cfg.projection);
-  if (!p) return;
+  // On the crew member's OWN video, where they look is always the centre of their screen (their crosshair).
+  // So the dot is clamped there, independent of tracking; the tracked angles are used on MY screen (the HUD).
+  // 'projected' keeps the old angle-mapped placement.
+  let p;
+  if (cfg.dot.crewVideo !== 'projected') {
+    const c = cfg.overlay.crop, x = (0.5 - c.x) / c.w, y = (0.5 - c.y) / c.h;
+    p = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)), inRange: x >= 0 && x <= 1 && y >= 0 && y <= 1 };
+  } else {
+    if (s.az === null) { smoother.reset(); return; }
+    p = project({ az: s.az, el: s.el }, cfg.projection);
+    if (!p) return;
+  }
   const sm = smoother.step(p.x, p.y, now, cfg.smoothing.visualTauMs);
   const { px, py } = toPixels(sm, r);
   const d = cfg.dot, rad = d.size / 2;

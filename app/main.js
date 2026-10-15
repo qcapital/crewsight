@@ -786,6 +786,13 @@ function runSelfTest(spec) {
       }, 2500);
       return;
     }
+    if (mode === 'create' && process.env.CREWSIGHT_PANTEST) {
+      for (let i = 0; i < 50; i++) {
+        const st = (await desktopCapturer.getSources({ types: ['window'], thumbnailSize: { width: 0, height: 0 } })).find((s) => s.name.startsWith('StillTest'));
+        if (st) { toOverlay('source', { id: st.id, name: st.name }); return; }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
     const screens = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } });
     if (screens[0]) toOverlay('source', { id: screens[0].id, name: screens[0].name });
   });
