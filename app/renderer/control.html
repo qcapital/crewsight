@@ -1,0 +1,202 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>CrewSight</title>
+<style>
+:root{--bg:#111316;--panel:#171a1e;--line:#2a2f35;--text:#d8dde3;--dim:#8b949e;--acc:#4ea1ff;--ok:#7ee787;--warn:#f2cc60;--bad:#ff7b72}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 "Segoe UI",system-ui,sans-serif;display:flex;height:100vh}
+nav{width:170px;background:#0d0f12;border-right:1px solid var(--line);padding:14px 0;flex-shrink:0}
+nav h1{font-size:13px;letter-spacing:.18em;margin:0 16px 14px;color:var(--dim)}
+nav button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--dim);padding:8px 16px;font:inherit;cursor:pointer}
+nav button.on{color:var(--text);background:var(--panel);border-left:2px solid var(--acc)}
+main{flex:1;overflow:auto;padding:18px 22px}
+section{display:none}section.on{display:block}
+h2{font-size:15px;margin:0 0 12px}h3{font-size:13px;margin:18px 0 8px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-bottom:12px}
+label{display:flex;align-items:center;gap:8px;margin:6px 0}label>span{min-width:170px;color:var(--dim)}
+input,select{background:#0d0f12;color:var(--text);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font:inherit}
+input[type=number]{width:90px}input[type=text]{width:260px}
+button.b{background:#1f252c;color:var(--text);border:1px solid #39414a;border-radius:4px;padding:5px 12px;font:inherit;cursor:pointer}
+button.b:hover{border-color:var(--acc)}button.p{background:#1d3a5c;border-color:#2f5f94}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.dim{color:var(--dim)}
+.code{font:600 22px/1 Consolas,monospace;letter-spacing:.12em}
+#sources{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.src{border:1px solid var(--line);border-radius:4px;padding:6px;cursor:pointer;background:#0d0f12}
+.src:hover{border-color:var(--acc)}.src.sel{border-color:var(--ok)}
+.src img{width:100%;display:block;aspect-ratio:16/9;object-fit:contain;background:#000}
+.src div{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:4px}
+#pad{width:360px;height:180px;background:#0d0f12;border:1px solid var(--line);position:relative;cursor:crosshair}
+#padDot{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--bad);transform:translate(-50%,-50%)}
+pre{background:#0d0f12;border:1px solid var(--line);padding:10px;border-radius:4px;font:12px Consolas,monospace;white-space:pre-wrap;margin:0}
+#toast{position:fixed;right:16px;bottom:16px;background:#1d3a5c;padding:8px 12px;border-radius:4px;display:none}
+.steps li{margin:3px 0}.steps li.cur{color:var(--acc);font-weight:600}.steps li.done{color:var(--ok)}
+#statusbar{position:fixed;left:170px;right:0;bottom:0;background:#0d0f12;border-top:1px solid var(--line);padding:4px 14px;font-size:11px;color:var(--dim)}
+main{padding-bottom:40px}
+</style></head>
+<body>
+<nav>
+  <h1>CREWSIGHT</h1>
+  <button data-tab="session" class="on">1 · Lobby</button>
+  <button data-tab="share">2 · Screen share</button>
+  <button data-tab="tracking">3 · Tracking</button>
+  <button data-tab="overlay">4 · Overlay &amp; dot</button>
+  <button data-tab="hotkeys">Hotkeys</button>
+  <button data-tab="diag">Diagnostics</button>
+  <button data-tab="about">About &amp; privacy</button>
+</nav>
+<main>
+<section id="session" class="on">
+  <h2>Lobby</h2>
+  <div class="card" id="firstRun" style="display:none">
+    <b>First-time setup</b> — work through tabs 1–4 in order: pick your seat and join a lobby, choose the game window
+    to share, calibrate tracking (or pick manual), then position the overlay. Both crew members do the same.
+    <div class="row" style="margin-top:8px"><button class="b" id="frDone">Got it</button></div>
+  </div>
+  <div class="card">
+    <label><span>My seat</span>
+      <select id="role"><option value="pilot">Pilot</option><option value="gunner">Gunner</option></select></label>
+    <label><span>Connection</span><select data-k="network.transport"><option value="p2p">Direct peer-to-peer (no server to host)</option><option value="relay">Own relay server (advanced)</option></select></label>
+    <label id="relayRow"><span>Relay server</span><input type="text" id="relayUrl" placeholder="wss://relay.example.com"></label>
+    <div class="dim" id="relayWarn"></div>
+  </div>
+  <div class="card">
+    <div class="row">
+      <button class="b p" id="create">Create lobby</button>
+      <span class="dim">or</span>
+      <input type="text" id="joinCode" placeholder="XXXX-XXXX-XXXX" style="width:170px;text-transform:uppercase">
+      <button class="b" id="join">Join lobby</button>
+      <button class="b" id="leave">Leave</button>
+    </div>
+    <div style="margin-top:12px" class="row">
+      <span class="code" id="code">—</span>
+      <button class="b" id="copy" style="display:none">Copy code</button>
+    </div>
+    <div style="margin-top:8px" id="sessState" class="dim">Not connected</div>
+    <div class="dim" style="margin-top:6px">Send the code to your crew member (e.g. in Discord chat). It works once, for one pilot + one gunner.</div>
+  </div>
+</section>
+
+<section id="share">
+  <h2>Screen share</h2>
+  <div class="card">
+    Choose <b>your own game window</b>. It is streamed directly to your crew member (peer-to-peer, encrypted) and
+    shown in their overlay; you see theirs in yours. Use windowed or borderless mode — exclusive fullscreen may not capture.
+    <div class="row" style="margin-top:8px">
+      <button class="b" id="refreshSrc">Refresh list</button>
+      <button class="b" id="stopShare">Stop sharing</button>
+      <span id="shareState" class="dim"></span>
+    </div>
+  </div>
+  <div id="sources"></div>
+  <h3>Quality</h3>
+  <div class="card">
+    <label><span>Max width (px)</span><input type="number" data-k="share.maxWidth" min="320" max="3840" step="1"></label>
+    <label><span>Max frame rate</span><input type="number" data-k="share.maxFps" min="5" max="60"></label>
+    <label><span>Max bitrate (kbps)</span><input type="number" data-k="share.maxBitrateKbps" min="300" max="20000" step="100"></label>
+    <label><span>Re-attach if window closes</span><input type="checkbox" data-k="share.autoReattach"></label>
+    <div class="dim">Changes apply when you pick the source again.</div>
+  </div>
+</section>
+
+<section id="tracking">
+  <h2>Tracking — what my crew member sees as my dot</h2>
+  <div class="card">
+    <label><span>Source</span><select data-k="tracking.mode">
+      <option value="mouse">Mouse estimate (calibrated)</option>
+      <option value="manual">Manual (drag pad below)</option>
+      <option value="simulated">Simulated sweep (testing only)</option></select></label>
+    <label><span>Observe my mouse</span><input type="checkbox" id="observe">
+      <span class="dim" style="min-width:0">Reads relative mouse counts only; nothing is recorded or sent raw.</span></label>
+    <label><span>Only while this app is focused</span><input type="text" data-k="tracking.foregroundFilter" style="width:160px">
+      <span class="dim" style="min-width:0">process-name filter (empty = any)</span></label>
+    <div id="trackState" class="dim"></div>
+    <div class="row" style="margin-top:6px"><button class="b" id="zero">Re-zero to nose (Ctrl+Alt+Z)</button></div>
+  </div>
+  <h3>Calibration</h3>
+  <div class="card">
+    <div id="calSummary" class="dim">No calibration</div>
+    <div id="calSetup">
+      <label><span>Horizontal reference angle (°)</span><input type="number" id="refX" value="90" min="10" max="180"></label>
+      <label><span>Vertical reference angle (°)</span><input type="number" id="refY" value="45" min="10" max="90"></label>
+      <label><span>Skip vertical (assume same scale)</span><input type="checkbox" id="skipY"></label>
+      <div id="pilotOpts">
+        <label><span>Free-look key (hex VK)</span><input type="text" id="vk" value="12" style="width:60px"><span class="dim" style="min-width:0">12 = Alt</span></label>
+        <label><span>View snaps back on release</span><input type="checkbox" id="recenter" checked></label>
+      </div>
+      <div class="row">
+        <button class="b p" id="calStart">Start calibration</button>
+        <button class="b" id="noseOnly">My view is fixed to the nose</button>
+        <button class="b" id="calReset">Reset calibration</button>
+      </div>
+    </div>
+    <div id="calRun" style="display:none">
+      <ol class="steps" id="calSteps"></ol>
+      <div class="row"><button class="b p" id="calMark">Mark (Ctrl+Alt+M)</button><button class="b" id="calCancel">Cancel</button></div>
+    </div>
+    <pre id="calResult" style="display:none;margin-top:10px"></pre>
+  </div>
+  <h3>Manual pad</h3>
+  <div class="card"><div id="pad"><div id="padDot" style="left:50%;top:50%"></div></div>
+    <div class="dim">Centre = nose. Horizontal ±180°, vertical ±90°. Used when Source = Manual.</div></div>
+</section>
+
+<section id="overlay">
+  <h2>Overlay &amp; dot</h2>
+  <div class="card">
+    <div class="row"><button class="b" id="showOv">Show / hide overlay</button><button class="b" id="ctOn">Click-through ON</button><button class="b" id="ctOff">Click-through OFF</button></div>
+    <div class="dim" style="margin-top:6px">Drag the overlay by its top bar and resize from its edges (click-through must be OFF).</div>
+    <label><span>Stream opacity</span><input type="number" data-k="overlay.streamOpacity" min="0.1" max="1" step="0.05"></label>
+    <label><span>Crop x / y / w / h (0–1)</span>
+      <input type="number" data-k="overlay.crop.x" min="0" max="0.9" step="0.01"><input type="number" data-k="overlay.crop.y" min="0" max="0.9" step="0.01">
+      <input type="number" data-k="overlay.crop.w" min="0.1" max="1" step="0.01"><input type="number" data-k="overlay.crop.h" min="0.1" max="1" step="0.01"></label>
+  </div>
+  <h3>Dot</h3>
+  <div class="card">
+    <label><span>Colour</span><input type="color" data-k="dot.color"></label>
+    <label><span>Size (px)</span><input type="number" data-k="dot.size" min="4" max="60"></label>
+    <label><span>Opacity</span><input type="number" data-k="dot.opacity" min="0.1" max="1" step="0.05"></label>
+    <label><span>Contrast halo</span><input type="checkbox" data-k="dot.halo"></label>
+    <label><span>Hide when stale</span><input type="checkbox" data-k="dot.hideWhenStale"></label>
+  </div>
+  <h3>Projection (angle → position)</h3>
+  <div class="card">
+    <label><span>Mode</span><select data-k="projection.mode"><option value="linear">Linear</option><option value="tangent">Perspective (tangent)</option></select></label>
+    <label><span>Horizontal edge = ±°</span><input type="number" data-k="projection.azMax" min="5" max="180"></label>
+    <label><span>Vertical edge = ±°</span><input type="number" data-k="projection.elMax" min="5" max="90"></label>
+    <label><span>Centre x / y (0–1)</span><input type="number" data-k="projection.centerX" min="0.05" max="0.95" step="0.01"><input type="number" data-k="projection.centerY" min="0.05" max="0.95" step="0.01"></label>
+    <div class="dim">Tip: set the edges to the game's horizontal/vertical FOV/2 with Perspective mode so the dot lands on what the crew member is looking at when it is inside your view. Beyond the edge an arrow points the way.</div>
+  </div>
+  <h3>Smoothing &amp; timing</h3>
+  <div class="card">
+    <label><span>Network interpolation</span><input type="checkbox" data-k="smoothing.interpolate"></label>
+    <label><span>Interpolation delay (ms)</span><input type="number" data-k="smoothing.interpDelayMs" min="0" max="200"></label>
+    <label><span>Visual smoothing τ (ms, 0 = off)</span><input type="number" data-k="smoothing.visualTauMs" min="0" max="300"></label>
+    <label><span>Send rate (Hz)</span><input type="number" data-k="network.sendHz" min="5" max="60"></label>
+    <label><span>Stale after (ms)</span><input type="number" data-k="network.staleMs" min="200" max="5000"></label>
+  </div>
+</section>
+
+<section id="hotkeys">
+  <h2>Hotkeys</h2>
+  <div class="card" id="hkList"></div>
+  <div id="hkFail" class="bad"></div>
+  <div class="dim">Electron accelerator syntax, e.g. <code>Ctrl+Alt+O</code>, <code>F9</code>. A hotkey that another app already owns cannot be registered — pick another; the same actions are in the tray menu.</div>
+  <div class="row" style="margin-top:8px"><button class="b" id="resetAll">Reset ALL settings</button></div>
+</section>
+
+<section id="diag"><h2>Diagnostics</h2><pre id="diagOut">waiting…</pre></section>
+
+<section id="about"><h2>About &amp; privacy</h2><div class="card">
+<p>CrewSight is an external companion. It never reads or writes game memory, never injects code or input, and never modifies game files.</p>
+<p><b>Sent to the relay:</b> lobby code, your seat, viewpoint estimates (two angles + status, ~30/s), WebRTC connection setup, pings.
+<b>Sent to your crew member only (peer-to-peer, DTLS-SRTP encrypted):</b> the video of the window you choose to share. No audio. Nothing is recorded.</p>
+<p><b>Mouse:</b> only when "Observe my mouse" is on — relative counts are turned into an angle locally; raw counts are never sent or logged.</p>
+<p>The dot is an <b>estimate</b>. Read the state label next to it: MOUSE ESTIMATE, MANUAL, NOSE (ASSUMED), SIMULATED, STALE.</p>
+</div></section>
+</main>
+<div id="statusbar">…</div>
+<div id="toast"></div>
+<script src="control.js"></script>
+</body></html>

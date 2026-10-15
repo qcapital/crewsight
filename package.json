@@ -1,0 +1,24 @@
+{
+  "name": "wardogs-crewsight",
+  "productName": "CrewSight",
+  "version": "0.1.0",
+  "description": "Pilot-gunner live viewpoint overlay for WarDogs (external companion; no game interaction)",
+  "main": "app/main.js",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "relay": "node relay/server.js",
+    "test": "node --test tests/*.test.js",
+    "build:native": "powershell -ExecutionPolicy Bypass -File scripts/build-native.ps1",
+    "package": "npm run build:native && node scripts/package.js"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.5",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.4.4",
+    "electron": "^33.4.11"
+  }
+}
