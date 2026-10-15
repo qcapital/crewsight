@@ -59,6 +59,7 @@ An arrow at the edge means they are looking beyond the angles set in **Projectio
 | `Ctrl+Alt+Z` | Re-zero |
 | `Ctrl+Alt+M` | Calibration mark |
 | `Ctrl+Alt+H` | Crew dot on my screen (HUD) on/off |
+| `Ctrl+Shift+Space` | Ping where I aim (marker + snapshot) |
 
 Conflicts are listed on the Hotkeys tab. The tray menu provides the same toggles.
 
@@ -84,6 +85,23 @@ Both players' directions are shared **relative to the helicopter's nose**. Both 
 It relies on two game behaviours that need a 1-minute in-game check (please report the results):
 1. **Gunner turret not gyro-stabilised.** The gunner puts the crosshair on a distant landmark, keeps the mouse still, and the pilot yaws 90°. If the crosshair swings with the helicopter, all is good. If it stays locked on the landmark, the turret is stabilised: the gunner's dot will then drift during manoeuvres until they re-zero (`Ctrl+Alt+Z` while aiming at the nose).
 2. **Cameras roll with the helicopter.** The pilot rolls hard. If the horizon tilts on both screens, all is good. If the game keeps the horizon level, the dot will be rotated by the roll angle.
+
+## Pings (new in 0.3.0)
+Press **Ctrl+Shift+Space** (changeable on the Hotkeys tab) in game to ping the spot under your crosshair.
+- **Marker:** your crew member sees a pulsing marker exactly where you're aiming, placed in their own view. It stays right while the helicopter manoeuvres. If the spot is off their screen, an arrow points the way.
+- **Snapshot:** they also get a snapshot card of your screen around your crosshair. You must be sharing your game window for the snapshot to be taken.
+- **Settings:** card on/off, zoom (Close / Medium / Wide), position and duration are under Overlay & dot → Pings. There's also a "Send a test ping" button.
+- **Gunner calibration:** the marker needs the pinging player's direction, so a gunner who hasn't calibrated can only send the snapshot.
+- **Relay mode:** pings sent over the optional relay carry no snapshot.
+
+## Gun limits (gunner, new in 0.3.0)
+Records exactly where the gun can point, so the gunner's tracked aim stops at the same limits as the real gun. Afterwards, pushing into a stop no longer makes the dot drift. Do this once, after calibrating:
+1. Land the helicopter, so nothing else moves on screen, and share your game window on the Screen share tab.
+2. Go to Tracking → Gun limits and press **Record limits**. Aim at the nose and press **Mark** (`Ctrl+Alt+M`).
+3. Slowly sweep the gun around the **whole outer edge** of its range (top edge, far side, bottom edge, other side), come back to the nose and press **Mark** again.
+4. Follow the edges closely and don't keep pushing into a stop. While your screen is shared, the app also spots when the picture stops moving and ignores that mouse movement, so an accidental push doesn't stretch the limits.
+
+**Storage:** the limits are saved in degrees in `%APPDATA%\CrewSight\config.json`. They survive app updates and don't depend on mouse sensitivity. Use **Export…** to save them to a file, and **Import…** to load them on another PC or after a reinstall.
 
 ## Known limitations
 - **Gunner calibration:** the pilot's HUD works with no setup. The gunner must calibrate mouse tracking; otherwise the gunner's own aim is unknown, so the gunner's HUD cannot place the pilot's dot, and the pilot's HUD cannot place the gunner's.

@@ -144,6 +144,7 @@ function ensureP2P() {
   p2p = new P2PSession({ iceServers: cfg.network.iceServers, broker: cfg.network.broker });
   p2p.on('status', (s) => { p2pStatus = s; ipcRenderer.send('p2p-status', s); if (!s.seats || !s.seats[s.role === 'pilot' ? 'gunner' : 'pilot']) remote.reset(); renderLink(); });
   p2p.on('viewpoint', (m) => { remote.accept(m, performance.now()); ipcRenderer.send('remote-vp', m); });
+  p2p.on('mark', (mk) => ipcRenderer.send('mark-in', mk));
   p2p.on('stream', (s) => { video.srcObject = s; if (s) video.play().catch(() => {}); renderLink(); });
   if (localStream) p2p.setLocalStream(localStream, cfg.share);
   return p2p;
@@ -177,6 +178,29 @@ function startMotion() {
   }, 50);
 }
 ipcRenderer.on('motion', (_e, on) => { motionOn = on; startMotion(); });
+
+// ---------------- pings: snapshot around MY crosshair (centre of my shared game window) ----------------
+const snapVideo = document.createElement('video'); snapVideo.muted = true;
+const snapCv = document.createElement('canvas');
+function snapshotAroundCentre(zoom) {
+  if (!localStream) return null;
+  if (snapVideo.srcObject !== localStream) { snapVideo.srcObject = localStream; snapVideo.play().catch(() => {}); }
+  const vw = snapVideo.videoWidth, vh = snapVideo.videoHeight;
+  if (!vw || !vh || snapVideo.readyState < 2) return null;
+  let cw = Math.round(vw * Math.min(1, Math.max(0.1, zoom))), ch = Math.round((cw * 9) / 16);
+  if (ch > vh) { ch = vh; cw = Math.round((ch * 16) / 9); }
+  snapCv.width = Math.min(640, cw); snapCv.height = Math.round((snapCv.width * ch) / cw);
+  snapCv.getContext('2d').drawImage(snapVideo, (vw - cw) / 2, (vh - ch) / 2, cw, ch, 0, 0, snapCv.width, snapCv.height);
+  for (const q of [0.8, 0.6, 0.4]) { const url = snapCv.toDataURL('image/jpeg', q); if (url.length < 280000) return url; }
+  return null;
+}
+ipcRenderer.on('make-mark', (_e, mk) => {
+  const img = snapshotAroundCentre(mk.zoom);
+  const mark = { id: mk.id, az: mk.az, el: mk.el, img };
+  if (isP2P()) { if (p2p) p2p.sendMark(mark); } else ipcRenderer.send('mark-out', mark);
+});
+// Keep the snapshot video warm while sharing, so the first ping has a frame.
+setInterval(() => { if (localStream && snapVideo.srcObject !== localStream) { snapVideo.srcObject = localStream; snapVideo.play().catch(() => {}); } }, 2000);
 
 // ---------------- IPC ----------------
 ipcRenderer.on('config', (_e, c) => {

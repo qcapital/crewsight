@@ -34,7 +34,7 @@ function fillFields() {
   $('relayRow').style.display = cfg.network.transport === 'relay' ? '' : 'none';
 }
 document.querySelectorAll('[data-k]').forEach((el) => el.addEventListener('change', async () => {
-  let v = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+  let v = el.type === 'checkbox' ? el.checked : el.type === 'number' || el.dataset.num ? Number(el.value) : el.value;
   if (el.type === 'number') {
     if (!Number.isFinite(v)) return fillFields();
     v = Math.min(Number(el.max || Infinity), Math.max(Number(el.min || -Infinity), v));
@@ -179,6 +179,8 @@ function drawLimits() {
   if (limLive && limLive.step === 'trace') { g.beginPath(); g.arc(X(limLive.az), Y(limLive.el), 4, 0, 7); g.fillStyle = limLive.blocking ? '#ff7b72' : '#7ee787'; g.fill(); }
 }
 
+$('pingTest').onclick = () => ipcRenderer.send('ping-now');
+
 // manual pad
 const pad = $('pad');
 function padSet(e) {
@@ -197,7 +199,7 @@ $('ctOff').onclick = () => ipcRenderer.send('set-click-through', false);
 
 // ---------- hotkeys ----------
 const HK_LABELS = { toggleOverlay: 'Show / hide overlay', toggleClickThrough: 'Toggle click-through', openSettings: 'Open settings',
-  recalibrate: 'Recalibrate', toggleTracking: 'Toggle mouse observation', zero: 'Re-zero to nose', calMark: 'Calibration mark', toggleHud: 'Crew dot on my screen' };
+  recalibrate: 'Recalibrate', toggleTracking: 'Toggle mouse observation', zero: 'Re-zero to nose', calMark: 'Calibration mark', toggleHud: 'Crew dot on my screen', ping: 'Ping where I aim' };
 function renderHotkeys() {
   const box = $('hkList'); box.innerHTML = '';
   for (const [k, label] of Object.entries(HK_LABELS)) {

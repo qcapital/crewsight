@@ -4,7 +4,10 @@
 const { isFiniteNum } = require('./projection');
 
 const PROTOCOL_VERSION = 1;
-const MAX_MESSAGE_BYTES = 16384;          // whole frame (SDP offers are a few KB)
+const MAX_MESSAGE_BYTES = 16384;          // relay frames (SDP offers are a few KB)
+const MAX_PING_BYTES = 300000;            // P2P ping with a JPEG snapshot
+const MAX_PING_IMG = 290000;
+const IMG_RE = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/;
 const MAX_SMALL_BYTES = 1024;            // every non-signalling message
 const MAX_SIGNAL_DATA = 15000;
 const SIGNAL_KINDS = ['description', 'candidate'];
@@ -58,20 +61,37 @@ const validators = {
   sig: (m) => SIGNAL_KINDS.includes(m.kind) && typeof m.data === 'string' && m.data.length <= MAX_SIGNAL_DATA
     ? { t: 'sig', kind: m.kind, data: m.data } : null,
   ping: (m) => isUInt(m.id) && isFiniteNum(m.ts) ? { t: 'ping', id: m.id, ts: m.ts } : null,
+  // Crew ping: my aim direction (nose-relative, null if unknown) + optional JPEG snapshot around my crosshair.
+  mark: (m) => {
+    if (!isUInt(m.id)) return null;
+    let az = null, el = null;
+    if (m.az !== null || m.el !== null) {
+      if (!isFiniteNum(m.az) || !isFiniteNum(m.el) || m.az < -180 || m.az > 180 || m.el < -90 || m.el > 90) return null;
+      az = m.az; el = m.el;
+    }
+    let img = null;
+    if (m.img !== null && m.img !== undefined) {
+      if (typeof m.img !== 'string' || m.img.length > MAX_PING_IMG || !IMG_RE.test(m.img)) return null;
+      img = m.img;
+    }
+    return { t: 'mark', id: m.id, az, el, img };
+  },
   pong: (m) => isUInt(m.id) && isFiniteNum(m.ts) ? { t: 'pong', id: m.id, ts: m.ts } : null,
 };
-const PEER_TYPES = new Set(['vp', 'sig', 'ping', 'pong']);
+const PEER_TYPES = new Set(['vp', 'sig', 'ping', 'pong', 'mark']);
 
 /** Parse+validate a raw frame. Returns { msg } or { error }. */
 function parse(raw) {
   const text = typeof raw === 'string' ? raw : Buffer.isBuffer(raw) ? raw.toString('utf8') : null;
   if (text === null) return { error: 'not-text' };
-  if (Buffer.byteLength(text, 'utf8') > MAX_MESSAGE_BYTES) return { error: 'too-large' };
+  if (Buffer.byteLength(text, 'utf8') > Math.max(MAX_MESSAGE_BYTES, MAX_PING_BYTES)) return { error: 'too-large' };
   let m;
   try { m = JSON.parse(text); } catch { return { error: 'bad-json' }; }
   if (!m || typeof m !== 'object' || Array.isArray(m)) return { error: 'not-object' };
   if (m.v !== PROTOCOL_VERSION) return { error: 'bad-version' };
-  if (m.t !== 'sig' && Buffer.byteLength(text, 'utf8') > MAX_SMALL_BYTES) return { error: 'too-large' };
+  const bytes = Buffer.byteLength(text, 'utf8');
+  const limit = m.t === 'mark' ? MAX_PING_BYTES : m.t === 'sig' ? MAX_MESSAGE_BYTES : MAX_SMALL_BYTES;
+  if (bytes > limit) return { error: 'too-large' };
   const fn = validators[m.t];
   if (!fn) return { error: 'unknown-type' };
   const clean = fn(m);
@@ -81,4 +101,4 @@ function parse(raw) {
 function encode(msg) { return JSON.stringify({ v: PROTOCOL_VERSION, ...msg }); }
 
 module.exports = { PROTOCOL_VERSION, MAX_MESSAGE_BYTES, ROLES, SOURCES, STATES, CODE_ALPHABET, CODE_LEN,
-  PEER_TYPES, SIGNAL_KINDS, parse, encode, normaliseCode, formatCode };
+  PEER_TYPES, SIGNAL_KINDS, MAX_PING_BYTES, parse, encode, normaliseCode, formatCode };

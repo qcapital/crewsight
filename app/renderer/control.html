@@ -181,6 +181,15 @@ main{padding-bottom:40px}
     <label><span>Show name label</span><input type="checkbox" data-k="hud.showLabel"></label>
     <div class="dim">Set FOV to the game's vehicle FOV (Settings → First Person FOV – Vehicles). A wrong FOV puts the dot in the right direction but too near or far from centre. Quick check: both look at the same object; the dot should sit on it.</div>
   </div>
+  <h3>Pings</h3>
+  <div class="card">
+    <div class="dim">Press your ping key (Hotkeys tab, default Ctrl+Shift+Space) in game: your crew member sees a marker where you are aiming, placed in their own view, plus a snapshot of your screen around your crosshair. Share your game window so snapshots can be taken.</div>
+    <label><span>Show their snapshot card</span><input type="checkbox" data-k="ping.showCard"></label>
+    <label><span>Snapshot zoom (share of screen)</span><select data-k="ping.zoom" data-num="1"><option value="0.18">Close</option><option value="0.3">Medium</option><option value="0.5">Wide</option></select></label>
+    <label><span>Card position</span><select data-k="ping.cardPos"><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label>
+    <label><span>Card seconds</span><input type="number" data-k="ping.cardSeconds" min="1" max="30"></label>
+    <div class="row"><button class="b" id="pingTest">Send a test ping</button></div>
+  </div>
   <h3>Dot</h3>
   <div class="card">
     <label><span>Colour</span><input type="color" data-k="dot.color"></label>

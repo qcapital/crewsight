@@ -105,12 +105,14 @@ function createControl() {
     width: 900, height: 720, minWidth: 720, minHeight: 560, title: 'CrewSight', backgroundColor: '#111316',
     autoHideMenuBar: true, webPreferences: { nodeIntegration: true, contextIsolation: false },
   });
-  controlWin.once('ready-to-show', () => controlWin.setContentProtection(true));
+  // Applied once actually shown (and re-applied on every show): before that Windows ignores it.
+  const protect = () => { if (!process.env.CREWSIGHT_NO_CONTENT_PROTECTION && controlWin && !controlWin.isDestroyed()) controlWin.setContentProtection(true); };
+  controlWin.on('show', () => setTimeout(protect, 100)); controlWin.webContents.once('did-finish-load', () => setTimeout(protect, 300));
   controlWin.loadFile(path.join(__dirname, 'renderer', 'control.html'));
   controlWin.on('close', (e) => { if (!app.isQuitting) { e.preventDefault(); controlWin.hide(); } });
 }
 function pushOverlayConfig() {
-  toHud('config', { hud: cfg.hud, dot: cfg.dot, smoothing: cfg.smoothing, network: cfg.network, role: cfg.role });
+  toHud('config', { hud: cfg.hud, dot: cfg.dot, smoothing: cfg.smoothing, network: cfg.network, role: cfg.role, ping: cfg.ping });
   toOverlay('config', { overlay: cfg.overlay, dot: cfg.dot, projection: cfg.projection, smoothing: cfg.smoothing,
     network: cfg.network, role: cfg.role, share: cfg.share });
   toOverlay('mode', { clickThrough: state.clickThrough });
@@ -147,6 +149,7 @@ function registerHotkeys() {
     zero: () => { tracker.zero(performance.now()); toControl('toast', 'Tracking re-zeroed to the nose'); },
     calMark: () => (state.limRec ? limMark() : calMark()),
     toggleHud: () => setHudEnabled(!cfg.hud.enabled),
+    ping: () => sendPing(),
   };
   for (const [name, fn] of Object.entries(actions)) {
     const acc = cfg.hotkeys[name];
@@ -350,6 +353,24 @@ ipcMain.handle('lim-import', async () => {
   cfg.gunLimits = { ...x, importedAt: new Date().toISOString() }; saveCfg(); tracker.setLimits(cfg.gunLimits); pushStatus();
   return 'ok';
 });
+
+// ---------- pings ----------
+// Ping = my current aim direction (crosshair; the mouse is locked to the centre in game) + a snapshot of my own
+// screen around the crosshair. The crew member's HUD places the marker in THEIR view from the direction.
+let pingId = 0, lastPingAt = 0;
+function sendPing() {
+  const now = performance.now();
+  if (now - lastPingAt < 600) return;
+  lastPingAt = now;
+  const est = localEstimate(now);
+  const mark = { id: ++pingId, az: est.az === null ? null : Math.round(est.az * 100) / 100, el: est.el === null ? null : Math.round(est.el * 100) / 100 };
+  toOverlay('make-mark', { ...mark, zoom: cfg.ping.zoom });
+  toHud('mark', { ...mark, img: null, mine: true });
+}
+ipcMain.on('mark-out', (_e, mark) => { if (cfg.network.transport === 'relay' && net.state === 'connected') net.sendMark(mark); });
+ipcMain.on('mark-in', (_e, mark) => toHud('mark', mark));
+net.on('mark', (mk) => toHud('mark', mk));
+ipcMain.on('ping-now', () => sendPing());
 
 // ---------- local estimate + send loop ----------
 function localEstimate(now) {
@@ -643,7 +664,9 @@ function runSelfTest(spec) {
   let lastDiag = null, staleSamples = 0, diagSamples = 0;
   const metrics = [];
   ipcMain.on('overlay-diag', (_e, d) => { lastDiag = d; diagSamples++; if (d.stale) staleSamples++; });
-  let hudSamples = 0, hudDrawn = 0, hudLast = null;
+  let hudSamples = 0, hudDrawn = 0, hudLast = null; const marksSeen = [];
+  ipcMain.on('hud-mark-diag', (_e, d) => { if (d.img) fs.writeFileSync(path.join(dir, 'ping-snapshot.jpg'), Buffer.from(d.img.split(',')[1], 'base64')); delete d.img; marksSeen.push(d); });
+  if (mode === 'create') setTimeout(() => sendPing(), Number(process.env.CREWSIGHT_SELFTEST_MS || 15000) - 3000);
   ipcMain.on('hud-diag', (_e, d) => { hudSamples++; if (d.drawn) hudDrawn++; hudLast = d; });
   // Whole-app CPU (% of one core, summed over processes) and memory, every 10 s.
   const t0 = Date.now();
@@ -670,7 +693,8 @@ function runSelfTest(spec) {
   }, 500));
   setTimeout(async () => {
     try { fs.writeFileSync(path.join(dir, `overlay-${mode}.png`), (await overlayWin.webContents.capturePage()).toPNG()); } catch {}
-    fs.writeFileSync(outFile, JSON.stringify({ hud: { hudSamples, hudDrawn, hudLast }, metrics, staleSamples, diagSamples, session: state.session, diag: { ...lastDiag, rttMs: lastDiag && lastDiag.transport === 'p2p' ? lastDiag.p2pRttMs : net.rttMs } }, null, 2));
+    try { fs.writeFileSync(path.join(dir, `hud-${mode}.png`), (await hudWin.webContents.capturePage()).toPNG()); } catch {}
+    fs.writeFileSync(outFile, JSON.stringify({ marksSeen, hud: { hudSamples, hudDrawn, hudLast }, metrics, staleSamples, diagSamples, session: state.session, diag: { ...lastDiag, rttMs: lastDiag && lastDiag.transport === 'p2p' ? lastDiag.p2pRttMs : net.rttMs } }, null, 2));
     app.isQuitting = true; app.quit();
   }, Number(process.env.CREWSIGHT_SELFTEST_MS || 15000));
 }

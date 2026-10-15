@@ -138,6 +138,11 @@ class P2PSession extends EventEmitter {
     const { msg } = P.parse(d);
     if (!msg || !this.helloOk) return;
     if (msg.t === 'vp') this.emit('viewpoint', { ...msg, from: this.peerRole });
+    else if (msg.t === 'mark') {
+      // At most 3 pings per 2 s from the crew member.
+      const now = performance.now(); this._marks = (this._marks || []).filter((t) => now - t < 2000);
+      if (this._marks.length < 3) { this._marks.push(now); this.emit('mark', { ...msg, from: this.peerRole }); }
+    }
     else if (msg.t === 'ping') this._send({ t: 'pong', id: msg.id, ts: msg.ts });
     else if (msg.t === 'pong') {
       const s = this.pending.get(msg.id);
@@ -145,6 +150,7 @@ class P2PSession extends EventEmitter {
     }
   }
   sendViewpoint(vp) { if (this.helloOk) this._send({ t: 'vp', ...vp }); }
+  sendMark(mark) { if (!this.helloOk) return false; this._send({ t: 'mark', ...mark }); return true; }
 
   // ----- video -----
   setLocalStream(stream, tune) {

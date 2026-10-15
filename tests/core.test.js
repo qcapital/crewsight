@@ -216,3 +216,14 @@ test('calibration (lenient): real gunner data is accepted as approximate with ve
   assert.equal(solveAxis({ refDeg: 90, countsPos: 4000, countsReturn: 0, countsNeg: -500 }).valid, false, '8x mismatch still rejected');
   assert.equal(combineAxes(solveAxis({ refDeg: 90, countsPos: 30, countsReturn: 0, countsNeg: -30 }), sy).valid, false);
 });
+
+test('protocol: ping marks (direction + snapshot) are validated', () => {
+  const img = 'data:image/jpeg;base64,' + 'A'.repeat(50000);
+  assert.ok(P.parse(JSON.stringify({ v: 1, t: 'mark', id: 1, az: 12, el: -3, img })).msg.img);
+  assert.ok(P.parse(JSON.stringify({ v: 1, t: 'mark', id: 2, az: null, el: null, img: null })).msg, 'direction unknown allowed');
+  for (const bad of [{ img: 'data:image/png;base64,AAAA' }, { img: 'javascript:alert(1)' }, { az: 500 }, { az: 1, el: null },
+    { img: 'data:image/jpeg;base64,' + 'A'.repeat(300000) }, { id: -1 }]) {
+    assert.ok(P.parse(JSON.stringify({ v: 1, t: 'mark', id: 3, az: 0, el: 0, img: null, ...bad })).error, JSON.stringify(bad).slice(0, 60));
+  }
+  assert.ok(P.parse(JSON.stringify({ ...vp(), pad: 'x'.repeat(2000) })).error, 'other types keep the small limit');
+});
